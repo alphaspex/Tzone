@@ -6,7 +6,7 @@ from .time_utils import format_hour, get_timezone
 
 DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-_RANGE = re.compile(r"^(\\d{1,2})\\s*-\\s*(\\d{1,2})$")
+_RANGE = re.compile(r"^(\d{1,2})\s*-\s*(\d{1,2})$")
 
 
 def parse_schedule_fields(fields: dict[str, str]) -> list[dict]:
