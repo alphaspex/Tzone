@@ -1,40 +1,21 @@
 import asyncio
 import logging
-import re
 import time
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 import discord
 
 from .d1 import D1Client
+from .time_utils import due_cycle, get_timezone, nickname_for
 
 
 log = logging.getLogger("tzone.nickname")
 MAX_ATTEMPTS = 4
 BATCH_SIZE = 20
-_SUFFIX = re.compile(r"\s+\|\s+\d{1,2}\s+(?:AM|PM)$", re.IGNORECASE)
-
-
-def _nickname_for(server_name: str, display_hour: datetime) -> str:
-    base = _SUFFIX.sub("", server_name).strip()
-    suffix = " | " + display_hour.strftime("%I %p").lstrip("0")
-    return (base[: 32 - len(suffix)].rstrip() or "Member") + suffix
-
-
-def _due_cycle(local_now: datetime, window_minutes: int) -> tuple[str, datetime] | None:
-    if local_now.minute >= 60 - window_minutes:
-        cycle_hour = local_now.replace(minute=0, second=0, microsecond=0)
-        return cycle_hour.strftime("%Y-%m-%d-%H"), cycle_hour + timedelta(hours=1)
-    if local_now.minute < 5:
-        display_hour = local_now.replace(minute=0, second=0, microsecond=0)
-        cycle_hour = display_hour - timedelta(hours=1)
-        return cycle_hour.strftime("%Y-%m-%d-%H"), display_hour
-    return None
 
 
 class NicknameQueue:
-    """D1-backed per-member queue. The Discord edit operation is isolated here."""
+    """D1-backed per-member queue; each state transition is persisted."""
 
     def __init__(
         self, db: D1Client, updates_per_second: float = 40.0,
@@ -44,6 +25,8 @@ class NicknameQueue:
         self._interval = 1.0 / max(1.0, min(40.0, updates_per_second))
         self._max_attempts = min(MAX_ATTEMPTS, max(1, max_attempts))
         self._last_request = 0.0
+        self._cleanup_day = None
+        self._cleaned_guilds: set[str] = set()
 
     async def run_guild(
         self, guild: discord.Guild, timezone_rows: list[dict],
@@ -51,26 +34,38 @@ class NicknameQueue:
     ) -> dict[str, int]:
         now = now or datetime.now(timezone.utc)
         summary = {"checked": 0, "updated": 0, "failed": 0, "skipped": 0}
+
+        if self._cleanup_day != now.date():
+            self._cleanup_day = now.date()
+            self._cleaned_guilds.clear()
+        if str(guild.id) not in self._cleaned_guilds:
+            await self._db.execute(
+                """DELETE FROM nickname_updates
+                   WHERE julianday(updated_at) < julianday('now', '-3 days')"""
+            )
+            self._cleaned_guilds.add(str(guild.id))
+
         if not guild.chunked:
             await guild.chunk(cache=True)
 
         due = []
         for row in timezone_rows:
-            local_now = now.astimezone(ZoneInfo(row["timezone"]))
-            cycle = _due_cycle(local_now, window_minutes)
+            local_now = now.astimezone(get_timezone(row["timezone"]))
+            cycle = due_cycle(local_now, window_minutes)
             if cycle is None:
                 continue
+
             member = guild.get_member(int(row["user_id"]))
             if member is None or member.bot:
                 summary["skipped"] += 1
                 continue
+
             cycle_key, display_hour = cycle
-            target = _nickname_for(member.nick or member.name, display_hour)
             due.append({
                 "guild_id": str(guild.id),
                 "user_id": str(member.id),
                 "cycle_key": cycle_key,
-                "target_nickname": target,
+                "target_nickname": nickname_for(member.nick or member.name, display_hour),
                 "member": member,
             })
 
@@ -84,37 +79,37 @@ class NicknameQueue:
         )
         job_map = {(str(row["user_id"]), row["cycle_key"]): row for row in jobs}
         pending = []
+        immediate_states = []
 
         for item in due:
             summary["checked"] += 1
-            key = (item["user_id"], item["cycle_key"])
-            existing = job_map.get(key)
-            if existing is None:
-                item["attempts"] = 0
-                item["status"] = "pending"
-                pending.append(item)
-                continue
+            existing = job_map.get((item["user_id"], item["cycle_key"]))
+            attempts = int(existing["attempts"]) if existing else 0
+            status = existing["status"] if existing else "pending"
+            item["attempts"] = attempts
+            item["status"] = status
 
-            item["attempts"] = int(existing["attempts"])
-            item["status"] = existing["status"]
             if item["member"].nick == item["target_nickname"]:
-                if item["status"] != "success":
-                    await self._save_states([{
-                        **item, "status": "success", "attempts": item["attempts"],
-                        "last_error": "",
-                    }])
+                immediate_states.append({
+                    **item, "status": "success", "last_error": "",
+                })
                 summary["skipped"] += 1
                 continue
 
-            if item["attempts"] >= self._max_attempts:
+            if attempts >= self._max_attempts:
+                if status != "failed":
+                    immediate_states.append({
+                        **item, "status": "failed",
+                        "last_error": "Maximum attempts reached for this hourly cycle.",
+                    })
                 summary["failed"] += 1
                 continue
 
-            if item["status"] == "success":
-                item["status"] = "pending"
             pending.append(item)
 
+        await self._save_states(immediate_states)
         if pending:
+            # Insert new rows and preserve existing attempt counts.
             await self._insert_jobs(pending)
             result = await self._run_jobs(pending)
             summary["updated"] += result["updated"]
@@ -136,14 +131,20 @@ class NicknameQueue:
         statements = []
         for job in jobs:
             statements.append((
-                """UPDATE nickname_updates
-                   SET target_nickname = ?, status = ?, attempts = ?, last_error = ?,
-                       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                   WHERE guild_id = ? AND user_id = ? AND cycle_key = ?""",
+                """INSERT INTO nickname_updates
+                   (guild_id, user_id, target_nickname, cycle_key, status,
+                    attempts, last_error, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                   ON CONFLICT(guild_id, user_id, cycle_key) DO UPDATE SET
+                     target_nickname = excluded.target_nickname,
+                     status = excluded.status,
+                     attempts = excluded.attempts,
+                     last_error = excluded.last_error,
+                     updated_at = excluded.updated_at""",
                 [
-                    job["target_nickname"], job["status"], job["attempts"],
-                    job.get("last_error") or None, job["guild_id"],
-                    job["user_id"], job["cycle_key"],
+                    job["guild_id"], job["user_id"], job["target_nickname"],
+                    job["cycle_key"], job["status"], job["attempts"],
+                    job.get("last_error") or None,
                 ],
             ))
         await self._db.batch(statements)
@@ -161,13 +162,16 @@ class NicknameQueue:
 
             for offset in range(0, len(pending), BATCH_SIZE):
                 group = pending[offset : offset + BATCH_SIZE]
-                marked = []
-                for job in group:
-                    marked.append({
-                        **job, "attempts": job["attempts"] + 1,
-                        "status": "pending", "last_error": "",
-                    })
-                # Persist attempt consumption before making Discord requests.
+                marked = [
+                    {
+                        **job,
+                        "attempts": job["attempts"] + 1,
+                        "status": "pending",
+                        "last_error": "",
+                    }
+                    for job in group
+                ]
+                # Consume the attempt in D1 before the external Discord request.
                 await self._save_states(marked)
 
                 outcomes = []
@@ -176,12 +180,15 @@ class NicknameQueue:
                     if self._last_request and wait > 0:
                         await asyncio.sleep(wait)
                     self._last_request = time.monotonic()
+
                     try:
                         await job["member"].edit(
                             nick=job["target_nickname"],
                             reason="Tzone hourly local-time refresh",
                         )
-                        outcomes.append({**job, "status": "success", "last_error": ""})
+                        outcomes.append({
+                            **job, "status": "success", "last_error": "",
+                        })
                         updated += 1
                     except Exception as exc:
                         error = f"{type(exc).__name__}: {exc}"[:500]
