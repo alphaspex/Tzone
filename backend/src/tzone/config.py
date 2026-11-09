@@ -48,5 +48,7 @@ class Settings:
             nickname_window_minutes=max(
                 1, min(10, int(os.getenv("NICKNAME_WINDOW_MINUTES", "10")))
             ),
-            nickname_max_attempts=4,
+            nickname_max_attempts=min(
+                4, max(1, int(os.getenv("NICKNAME_MAX_ATTEMPTS", "4")))
+            ),
         )
