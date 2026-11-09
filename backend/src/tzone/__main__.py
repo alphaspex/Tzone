@@ -1,7 +1,6 @@
 import asyncio
 import logging
 
-import discord
 from dotenv import load_dotenv
 
 from .bot import TzoneBot
