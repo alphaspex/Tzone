@@ -27,13 +27,17 @@ Nicknames use a 12-hour clock without minutes: Alex | 2 PM. The bot prepares the
 4. Put the bot's highest role above the members whose nicknames it must change.
 5. Copy .env.example to .env and fill in the Discord bot token and Cloudflare API token. The account and D1 database IDs are already filled in.
 6. The Cloudflare API token needs Account D1 Read and Account D1 Write permissions.
-7. Apply migrations/0002_availability_and_nicknames.sql to the existing tzone-db database. Migration 0001 is already applied.
+7. The connected tzone-db already contains the 0002 tables and indexes; I verified them in D1. For a fresh database, apply migrations/0001_initial.sql and then migrations/0002_availability_and_nicknames.sql.
 8. Build and run from the backend directory:
 
     docker build -t tzone-bot .
     docker run -d --name tzone-bot --restart unless-stopped --env-file .env tzone-bot
 
 Set DISCORD_GUILD_ID while developing to sync slash commands to one server immediately. Leave it empty for global command registration.
+
+Run the standard-library unit tests from the backend directory:
+
+    PYTHONPATH=src python -m unittest discover -s tests -v
 
 ## D1 API note
 
