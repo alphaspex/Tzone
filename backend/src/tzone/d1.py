@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Iterable
 
 import httpx
 
@@ -8,7 +8,7 @@ class D1Error(RuntimeError):
 
 
 class D1Client:
-    """Small I/O boundary: SQL + parameters in, decoded D1 result out."""
+    """SQL + parameters in, decoded D1 results out."""
 
     def __init__(self, account_id: str, database_id: str, api_token: str) -> None:
         self._url = (
@@ -17,22 +17,40 @@ class D1Client:
         )
         self._client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {api_token}"},
-            timeout=httpx.Timeout(20.0),
+            timeout=httpx.Timeout(30.0, connect=10.0),
         )
 
-    async def query(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
-        encoded_params = [None if value is None else str(value) for value in (params or [])]
-        response = await self._client.post(self._url, json={"sql": sql, "params": encoded_params})
+    @staticmethod
+    def _params(values: Iterable[Any]) -> list[Any]:
+        return [None if value is None else str(value) for value in values]
+
+    async def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
+        response = await self._client.post(
+            self._url, json={"sql": sql, "params": self._params(params)}
+        )
         response.raise_for_status()
         payload = response.json()
         if not payload.get("success"):
             raise D1Error(str(payload.get("errors") or "D1 query failed"))
         results = payload.get("result") or []
-        if not results:
-            return []
-        return results[0].get("results") or []
+        return results[0].get("results") or [] if results else []
 
-    async def execute(self, sql: str, params: list[Any] | None = None) -> None:
+    async def batch(self, statements: list[tuple[str, Iterable[Any]]]) -> None:
+        if not statements:
+            return
+        response = await self._client.post(
+            self._url,
+            json={"batch": [
+                {"sql": sql, "params": self._params(params)}
+                for sql, params in statements
+            ]},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success"):
+            raise D1Error(str(payload.get("errors") or "D1 batch failed"))
+
+    async def execute(self, sql: str, params: Iterable[Any] = ()) -> None:
         await self.query(sql, params)
 
     async def close(self) -> None:
