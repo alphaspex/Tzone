@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import discord
 
 from .availability import (
-    DAYS, DAY_KEYS, current_status, format_interval, parse_schedule_fields,
-    validate_intervals, weekly_hours,
+    DAYS, DAY_KEYS, current_status, format_interval_for_timezone,
+    parse_schedule_fields, validate_intervals, weekly_hours,
 )
 from .time_utils import format_hour, get_timezone
 
@@ -300,27 +300,36 @@ async def show_current(interaction: discord.Interaction, store, mode: str):
             "Set your timezone first with /set_zone.", ephemeral=True
         )
         return
+    if not interaction.guild.chunked:
+        await interaction.guild.chunk(cache=True)
 
     profiles = await store.get_guild_schedules(str(interaction.guild.id))
     now = datetime.now(timezone.utc)
+    requester_tz = get_timezone(requester_timezone)
     entries = []
     for profile in profiles:
         local_now = now.astimezone(get_timezone(profile["timezone"]))
         status, interval = current_status(profile["intervals"], local_now)
         if status == "free" or (mode == "chat" and status == "chat"):
             label = "Free" if status == "free" else "Chat-only"
+            converted_interval = format_interval_for_timezone(
+                interval, local_now, requester_timezone
+            )
             entries.append(
                 f"**{_member_name(interaction.guild, profile['user_id'])}** — "
-                f"{label} ({format_interval(interval)})"
+                f"{label} ({converted_interval})"
             )
 
     entries.sort(key=str.casefold)
     pages = [
-        "\n".join(entries[index:index + 10])
+        "\\n".join(entries[index:index + 10])
         for index in range(0, len(entries), 10)
     ] or ["No members match this status right now."]
-    requester_now = now.astimezone(get_timezone(requester_timezone))
-    pages[0] = f"Current time: **{format_hour(requester_now)}**\n\n" + pages[0]
+    requester_now = now.astimezone(requester_tz)
+    pages = [
+        f"Current time: **{format_hour(requester_now)}**\\n\\n{page}"
+        for page in pages
+    ]
     title = "Who's Free right now" if mode == "free" else "Who's available to Chat"
     view = ListPager(title, pages, requester_timezone)
     await interaction.response.send_message(
@@ -358,10 +367,10 @@ async def show_weekly(interaction: discord.Interaction, store, mode: str):
             for item in rows if item["free"] == best and best > 0
         ]
         best_text = ", ".join(best_slots) if best_slots else "No Free slot found"
-        description = "\n".join(lines)
-        description += f"\n\n**Best Time (Free):** {best_text} · {best} people"
+        description = "\\n".join(lines)
+        description += f"\\n\\n**Best Time (Free):** {best_text} · {best} people"
         if mode == "chat":
-            description += "\n*Chat-only members are included in the hourly counts.*"
+            description += "\\n*Chat-only members are included in the hourly counts.*"
         pages.append((
             description,
             f"{target_date.isoformat()} · Best Free overlap: {best}",
