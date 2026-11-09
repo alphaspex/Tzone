@@ -21,10 +21,8 @@ class D1Client:
         )
 
     async def query(self, sql: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
-        response = await self._client.post(
-            self._url,
-            json={"sql": sql, "params": params or []},
-        )
+        encoded_params = [None if value is None else str(value) for value in (params or [])]
+        response = await self._client.post(self._url, json={"sql": sql, "params": encoded_params})
         response.raise_for_status()
         payload = response.json()
         if not payload.get("success"):
