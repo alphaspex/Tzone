@@ -1,43 +1,60 @@
 # Tzone Bot
 
-Single Python Discord bot container with Cloudflare D1 as its external database.
+One Python Discord bot in one Docker container, using the existing Cloudflare D1 database directly. No application Worker or second container is required.
 
-## Runtime
+## Features
 
-- Python 3.12
-- discord.py for the Discord Gateway and native slash-command UI
-- httpx for direct Cloudflare D1 REST API access
-- zoneinfo / tzdata for IANA timezone conversion
-- One Docker container; no separate application Worker is required
+- /set_zone: native multi-step Discord modal for an IANA timezone and hourly Free/Chat-only intervals across all seven days.
+- /delete_zone: delete your saved timezone and schedule.
+- /whos_free and /whos_chat: private live availability lists, 10 members per page.
+- /weekly_free and /weekly_chat: one weekday per page, hourly heatmap and best Free overlap.
+- Nicknames preserve each member's server name and append their local hour, e.g. Alex | 2 PM.
+- Each member is updated in their own local :50–:59 window. A :00–:04 recovery window catches missed updates after a restart.
+- Nickname jobs and attempt counts are persisted in D1. Each member gets at most four total attempts per local hourly cycle.
+- Nickname requests are paced at a maximum target of 40 per second. discord.py still enforces Discord's dynamic route and global rate limits.
 
-## Build
+## Schedule format
 
-    cp .env.example .env
+Enter whole-hour ranges in 24-hour format: 09-14, 18-21. The end hour is exclusive. Leave a field blank when unavailable. Overnight ranges such as 22-02 are split across midnight. Free and Chat-only ranges cannot overlap.
+
+Nicknames use a 12-hour clock without minutes: Alex | 2 PM. The bot prepares the next local hour during the last ten minutes before the hour changes.
+
+## Setup
+
+1. Create a Discord application and bot.
+2. Enable the Server Members Intent in the Discord Developer Portal.
+3. Invite the bot with the bot and applications.commands scopes. Grant Manage Nicknames.
+4. Put the bot's highest role above the members whose nicknames it must change.
+5. Copy .env.example to .env and fill in the Discord bot token and Cloudflare API token. The account and D1 database IDs are already filled in.
+6. The Cloudflare API token needs Account D1 Read and Account D1 Write permissions.
+7. Apply migrations/0002_availability_and_nicknames.sql to the existing tzone-db database. Migration 0001 is already applied.
+8. Build and run from the backend directory:
+
     docker build -t tzone-bot .
-    docker run --env-file .env --restart unless-stopped tzone-bot
+    docker run -d --name tzone-bot --restart unless-stopped --env-file .env tzone-bot
 
-Required environment variables are listed in .env.example. Keep .env private.
+Set DISCORD_GUILD_ID while developing to sync slash commands to one server immediately. Leave it empty for global command registration.
 
-## Database
+## D1 API note
 
-The existing D1 database already contains the initial timezone/message schema.
-Apply migrations in order:
+This project uses the D1 REST query API directly, as selected. Cloudflare documents that this API is primarily intended for administrative use and shares the account-wide Cloudflare API request limit. The bot batches queue-state writes to reduce API calls. If usage outgrows that allowance, the database transport can be replaced behind the D1Client boundary.
 
-1. migrations/0001_initial.sql (already applied)
-2. migrations/0002_availability_and_nicknames.sql
+## Important behavior
 
-The bot uses the Cloudflare D1 REST query endpoint directly. The API token needs permission to edit/query the target D1 database.
+- Discord's nickname route limits are dynamic. 40/s is a target ceiling, not a guaranteed endpoint allowance.
+- The bot honors discord.py's rate-limit handling. Discord may slow the queue below 40/s.
+- Four attempts means four total attempts, including the first. Failures are stored in D1 and retried; a terminal failure is retained until the next local hourly cycle.
+- Nickname updates require Manage Nicknames and a role hierarchy that permits editing the target member.
+- The bot needs Server Members Intent enabled both in code and in the Developer Portal.
+- Do not commit .env or any Discord/Cloudflare tokens.
 
-## Current implementation boundaries
+## File boundaries
 
-- tzone/d1.py: SQL + parameters in; rows out.
-- tzone/schedules.py: schedule persistence.
-- tzone/nickname_queue.py: durable nickname queue and per-member attempt tracking.
-- tzone/config.py: environment configuration.
-- tzone/__main__.py: process startup and Discord Gateway connection.
-
-Nickname updates are paced at a configurable target (default 40/sec), while discord.py's route/global rate-limit handling remains authoritative. The database stores attempts and terminal failures. The queue allows at most four total attempts per member per hourly cycle.
-
-## Not yet wired
-
-The native slash-command flows, multi-step schedule editor, weekly views, and hourly scheduler are the next implementation layer. The exact nickname display format also needs to be decided before the queue is connected to live member edits.
+- tzone/config.py: environment values in, validated settings out.
+- tzone/d1.py: SQL and parameters in, rows or completed batch out.
+- tzone/schedules.py: timezone/schedule persistence.
+- tzone/availability.py: schedule input and timezone conversion.
+- tzone/nickname_queue.py: due nickname jobs in, persisted attempt/success/failure state out.
+- tzone/discord_commands.py: Discord interactions in, native Discord responses out.
+- tzone/bot.py: connects commands and scheduled work.
+- tzone/__main__.py: process startup and shutdown.
