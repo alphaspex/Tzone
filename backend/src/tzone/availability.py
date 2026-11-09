@@ -76,11 +76,24 @@ def current_status(intervals: list[dict], local_time: datetime):
     return (item["status"], item) if item else (None, None)
 
 
-def format_interval(item: dict) -> str:
-    start = datetime(2000, 1, 1, int(item["start_hour"]))
+def format_interval_for_timezone(
+    item: dict, member_local_now: datetime, requester_timezone: str
+) -> str:
+    member_timezone = member_local_now.tzinfo
+    start = datetime.combine(
+        member_local_now.date(),
+        time(hour=int(item["start_hour"])),
+        tzinfo=member_timezone,
+    )
     end_hour = int(item["end_hour"])
-    end = datetime(2000, 1, 2, 0) if end_hour == 24 else datetime(2000, 1, 1, end_hour)
-    return f"{format_hour(start)}–{format_hour(end)}"
+    end_date = member_local_now.date() + timedelta(days=1) if end_hour == 24 else member_local_now.date()
+    end = datetime.combine(
+        end_date,
+        time(hour=0 if end_hour == 24 else end_hour),
+        tzinfo=member_timezone,
+    )
+    requester_tz = get_timezone(requester_timezone)
+    return f"{format_hour(start.astimezone(requester_tz))}–{format_hour(end.astimezone(requester_tz))}"
 
 
 def weekly_hours(
