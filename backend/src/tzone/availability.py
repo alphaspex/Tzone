@@ -76,6 +76,12 @@ def current_status(intervals: list[dict], local_time: datetime):
     return (item["status"], item) if item else (None, None)
 
 
+def _format_boundary(value: datetime) -> str:
+    if value.minute:
+        return value.strftime("%I:%M %p").lstrip("0")
+    return format_hour(value)
+
+
 def format_interval_for_timezone(
     item: dict, member_local_now: datetime, requester_timezone: str
 ) -> str:
@@ -93,7 +99,7 @@ def format_interval_for_timezone(
         tzinfo=member_timezone,
     )
     requester_tz = get_timezone(requester_timezone)
-    return f"{format_hour(start.astimezone(requester_tz))}–{format_hour(end.astimezone(requester_tz))}"
+    return f"{_format_boundary(start.astimezone(requester_tz))}–{_format_boundary(end.astimezone(requester_tz))}"
 
 
 def weekly_hours(
