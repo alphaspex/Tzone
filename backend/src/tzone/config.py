@@ -42,7 +42,11 @@ class Settings:
             cloudflare_account_id=account_id,
             d1_database_id=database_id,
             cloudflare_api_token=api_token,
-            nickname_updates_per_second=max(1.0, float(os.getenv("NICKNAME_UPDATES_PER_SECOND", "40"))),
-            nickname_window_minutes=max(1, min(10, int(os.getenv("NICKNAME_WINDOW_MINUTES", "10")))),
+            nickname_updates_per_second=max(
+                1.0, min(40.0, float(os.getenv("NICKNAME_UPDATES_PER_SECOND", "40")))
+            ),
+            nickname_window_minutes=max(
+                1, min(10, int(os.getenv("NICKNAME_WINDOW_MINUTES", "10")))
+            ),
             nickname_max_attempts=4,
         )
