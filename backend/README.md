@@ -1,39 +1,43 @@
-# Tzone Backend
+# Tzone Bot
 
-Cloudflare Worker API + D1 database for the Tzone Discord timezone bot.
+Single Python Discord bot container with Cloudflare D1 as its external database.
 
-## Components
+## Runtime
 
-- `src/index.js`: Worker API, Discord interaction endpoint, timezone command.
-- `migrations/0001_initial.sql`: D1 schema for per-server user timezones and message history.
-- Cloudflare D1 database: `tzone-db`.
+- Python 3.12
+- discord.py for the Discord Gateway and native slash-command UI
+- httpx for direct Cloudflare D1 REST API access
+- zoneinfo / tzdata for IANA timezone conversion
+- One Docker container; no separate application Worker is required
 
-## Routes
+## Build
 
-- `GET /health`: health check.
-- `POST /discord/interactions`: Discord HTTP interactions endpoint. Configure this as the Discord application's Interactions Endpoint URL. Set `DISCORD_PUBLIC_KEY` as a Worker secret.
-- `GET /api/messages?guild_id=...`: read recent messages; requires `Authorization: Bearer <API_TOKEN>`.
-- `POST /api/messages`: ingest a message; requires the same bearer token.
+    cp .env.example .env
+    docker build -t tzone-bot .
+    docker run --env-file .env --restart unless-stopped tzone-bot
 
-## Required Worker configuration
-
-Bind the D1 database as `DB` and set these secrets:
-
-- `DISCORD_PUBLIC_KEY`: Discord application's public key.
-- `API_TOKEN`: long random token shared only with the trusted message-ingestion service and dashboard server-side integration.
-
-Never commit Discord bot tokens or API tokens.
-
-## Discord command
-
-Register a slash command named `set_timezone` with one required STRING option named `timezone`. Use IANA identifiers such as `Europe/Paris`, `Africa/Algiers`, or `America/New_York`.
-
-## Message ingestion architecture
-
-Cloudflare Workers handle HTTP requests and Discord interactions, but do not run a permanent Discord Gateway client. To capture server messages, run a separate Discord Gateway listener (for example, a Node.js service) that forwards permitted message events to `POST /api/messages`.
-
-Enable Discord's Message Content privileged intent only if the bot genuinely needs message text. Obtain server-admin consent, disclose what is stored, and provide retention/deletion controls before collecting message content.
+Required environment variables are listed in .env.example. Keep .env private.
 
 ## Database
 
-The initial schema is in `migrations/0001_initial.sql`. It has been applied to the `tzone-db` database in the connected Cloudflare account.
+The existing D1 database already contains the initial timezone/message schema.
+Apply migrations in order:
+
+1. migrations/0001_initial.sql (already applied)
+2. migrations/0002_availability_and_nicknames.sql
+
+The bot uses the Cloudflare D1 REST query endpoint directly. The API token needs permission to edit/query the target D1 database.
+
+## Current implementation boundaries
+
+- tzone/d1.py: SQL + parameters in; rows out.
+- tzone/schedules.py: schedule persistence.
+- tzone/nickname_queue.py: durable nickname queue and per-member attempt tracking.
+- tzone/config.py: environment configuration.
+- tzone/__main__.py: process startup and Discord Gateway connection.
+
+Nickname updates are paced at a configurable target (default 40/sec), while discord.py's route/global rate-limit handling remains authoritative. The database stores attempts and terminal failures. The queue allows at most four total attempts per member per hourly cycle.
+
+## Not yet wired
+
+The native slash-command flows, multi-step schedule editor, weekly views, and hourly scheduler are the next implementation layer. The exact nickname display format also needs to be decided before the queue is connected to live member edits.
