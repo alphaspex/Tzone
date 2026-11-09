@@ -54,12 +54,10 @@ class NicknameQueue:
             cycle = due_cycle(local_now, window_minutes)
             if cycle is None:
                 continue
-
             member = guild.get_member(int(row["user_id"]))
             if member is None or member.bot:
                 summary["skipped"] += 1
                 continue
-
             cycle_key, display_hour = cycle
             due.append({
                 "guild_id": str(guild.id),
@@ -72,10 +70,13 @@ class NicknameQueue:
         if not due:
             return summary
 
+        cycle_keys = sorted({item["cycle_key"] for item in due})
+        placeholders = ",".join("?" for _ in cycle_keys)
         jobs = await self._db.query(
             """SELECT user_id, cycle_key, target_nickname, status, attempts
-               FROM nickname_updates WHERE guild_id = ?""",
-            [str(guild.id)],
+               FROM nickname_updates
+               WHERE guild_id = ? AND cycle_key IN (""" + placeholders + ")",
+            [str(guild.id), *cycle_keys],
         )
         job_map = {(str(row["user_id"]), row["cycle_key"]): row for row in jobs}
         pending = []
@@ -109,7 +110,6 @@ class NicknameQueue:
 
         await self._save_states(immediate_states)
         if pending:
-            # Insert new rows and preserve existing attempt counts.
             await self._insert_jobs(pending)
             result = await self._run_jobs(pending)
             summary["updated"] += result["updated"]
@@ -144,7 +144,7 @@ class NicknameQueue:
                 [
                     job["guild_id"], job["user_id"], job["target_nickname"],
                     job["cycle_key"], job["status"], job["attempts"],
-                    job.get("last_error") or None,
+                    job.get("last_error") or "",
                 ],
             ))
         await self._db.batch(statements)
@@ -171,7 +171,6 @@ class NicknameQueue:
                     }
                     for job in group
                 ]
-                # Consume the attempt in D1 before the external Discord request.
                 await self._save_states(marked)
 
                 outcomes = []
