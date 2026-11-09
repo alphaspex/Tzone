@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
 
 
-_SUFFIX = re.compile(r"\\s+\\|\\s+\\d{1,2}\\s+(?:AM|PM)$", re.IGNORECASE)
+_SUFFIX = re.compile(r"\s+\|\s+\d{1,2}\s+(?:AM|PM)$", re.IGNORECASE)
 
 
 def get_timezone(name: str) -> ZoneInfo:
