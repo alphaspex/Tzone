@@ -36,9 +36,7 @@ class CatalogTests(unittest.TestCase):
 
 class EvaluatorTests(unittest.TestCase):
     def test_markdown_fenced_json(self):
-        self.assertEqual(evaluator._json_value(chr(96) * 3 + "json
-{\"ok\":true}
-" + chr(96) * 3), {"ok": True})
+        self.assertEqual(evaluator._json_value(chr(96) * 3 + "json\\n{\\\"ok\\":true}\\n" + chr(96) * 3), {"ok": True})
 
     def test_json_assertions(self):
         result = evaluator.run_assertions(
