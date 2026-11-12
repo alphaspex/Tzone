@@ -27,6 +27,7 @@ def _run_summary(run):
             "assertions_total":assertion.get("total"),
             "judge_score":(result.get("model_evaluation") or {}).get("score"),
             "total_tokens":usage.get("total_tokens"),
+            "estimated_cost_usd":run.get("estimated_cost_usd") or result.get("estimated_cost_usd"),
         }
 
 def _current_memory_mb():
@@ -85,7 +86,7 @@ async def dashboard():
     passed = [r for r in completed if r.get("passed") is True]
     active = [r for r in runs if r.get("status") in ("queued","running")]
     return {
-        "model":(await model_settings.get_settings())["model"],"provider_configured":bool(settings.meta_api_key),
+        "model":(await model_settings.get_settings())["model"],"model_name":(await model_settings.get_settings())["model_name"],"provider_configured":bool(settings.meta_api_key),
         "d1_configured":store.configured(),"system_memory_mb":_current_memory_mb(),
         "runs_total":len(runs),"runs_completed":len(completed),
         "runs_passed":len(passed),"pass_rate":round(len(passed)/len(completed),4) if completed else None,
@@ -213,6 +214,8 @@ async def start_test_run(body: dict):
         raise HTTPException(404,str(exc))
     except RuntimeError as exc:
         raise HTTPException(409,str(exc))
+    except ValueError as exc:
+        raise HTTPException(422,str(exc))
     return {"run":_run_summary(run),"stream_url":f"/ui/runs/{run['id']}/stream"}
 
 @router.get("/runs")
