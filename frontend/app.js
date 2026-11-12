@@ -282,7 +282,7 @@
       assertions:[{type:"response_nonempty"}],tags:[],parameters:{temperature:0.2,max_tokens:512}
     };
     const categoryOptions = state.categories.map(x=>({value:x.id,label:x.name}));
-    const params = Object.assign({temperature:0.2,max_tokens:512},data.parameters || {});
+    const params = Object.assign({temperature:0.2,top_p:1,max_tokens:512,presence_penalty:0,frequency_penalty:0},data.parameters || {});
     const modal = '<div class="modal-backdrop" id="editor-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">' +
       (editing ? "CUSTOM TEST" : "NEW CUSTOM TEST") + '</div><h2>' + (editing ? "Edit test" : "Create a test") +
       '</h2></div><button class="btn small" data-action="close-modal">✕</button></div>' +
@@ -299,9 +299,10 @@
       '<div class="field"><label for="test-top-p">Top P</label><input class="input" id="test-top-p" type="number" min="0" max="1" step="0.05" value="' + esc(params.top_p == null ? 1 : params.top_p) + '"></div>' +
       '<div class="field"><label for="test-max-tokens">Maximum output tokens</label><input class="input" id="test-max-tokens" type="number" min="1" max="8192" value="' + esc(params.max_tokens) + '"></div>' +
       '<div class="field"><label for="test-presence">Presence penalty</label><input class="input" id="test-presence" type="number" min="-2" max="2" step="0.1" value="' + esc(params.presence_penalty || 0) + '"></div>' +
+      '<div class="field"><label for="test-frequency">Frequency penalty</label><input class="input" id="test-frequency" type="number" min="-2" max="2" step="0.1" value="' + esc(params.frequency_penalty || 0) + '"></div>' +
+      '<div class="field"><label for="test-timeout">Timeout (seconds)</label><input class="input" id="test-timeout" type="number" min="5" max="300" value="' + esc(data.timeout_seconds || 90) + '"></div>' +
+      textareaField("Additional model parameters (JSON)","test-extra-params",pretty(Object.fromEntries(Object.entries(params).filter(([key])=>!["temperature","top_p","max_tokens","presence_penalty","frequency_penalty"].includes(key)))),4,"Optional provider-specific parameters, such as stop, response_format, seed, logit_bias, or user.") +
       '<div class="field full"><div class="info-row"><span>Tool assignment</span><strong>Automatic from test prompt unless explicitly supplied</strong></div><div class="hint">The model sees only ordinary tool definitions selected for this scenario. Evaluation rules stay hidden.</div></div>' +
-      '<div class="field full"><label class="check-row"><input id="test-use-tools" type="checkbox" ' + ((data.tool_names || []).length ? "checked" : "") +
-      '> Use automatically selected tools for this task</label></div>' +
       '<div class="field full"><div class="heading-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">' +
       (editing ? "Save changes" : "Save custom test") + '</button></div></div></form></div></div>';
     $("#modal-root").innerHTML = modal;
@@ -315,12 +316,19 @@
       try { assertions = JSON.parse($("#test-assertions").value || "[]"); }
       catch (_) { toast("Assertions must be valid JSON.",true); return; }
       if (!Array.isArray(assertions)) { toast("Assertions must be a JSON array.",true); return; }
-      const parameters = {
+      let extraParameters;
+      try { extraParameters = JSON.parse($("#test-extra-params").value || "{}"); }
+      catch (_) { toast("Additional model parameters must be valid JSON.",true); return; }
+      if (!extraParameters || Array.isArray(extraParameters) || typeof extraParameters !== "object") {
+        toast("Additional model parameters must be a JSON object.",true); return;
+      }
+      const parameters = Object.assign({},extraParameters,{
         temperature:Number($("#test-temperature").value),
         top_p:Number($("#test-top-p").value),
         max_tokens:Number($("#test-max-tokens").value),
-        presence_penalty:Number($("#test-presence").value)
-      };
+        presence_penalty:Number($("#test-presence").value),
+        frequency_penalty:Number($("#test-frequency").value)
+      });
       const body = {
         name:$("#test-name").value,
         category:$("#test-category-edit").value,
@@ -332,7 +340,8 @@
         assertions:assertions,
         judge_rubric:$("#test-expected").value,
         parameters:parameters,
-        tool_names:$("#test-use-tools").checked ? [] : []
+        timeout_seconds:Number($("#test-timeout").value),
+        tool_names:[]
       };
       try {
         if (editing) await api("/ui/tests/" + encodeURIComponent(data.id),{method:"PUT",body:body});
