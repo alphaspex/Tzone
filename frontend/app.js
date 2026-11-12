@@ -422,29 +422,38 @@
 
   async function previewRun(id) {
     try {
-      const test=await api("/ui/tests/"+encodeURIComponent(id));
-      state.pendingRunTest=test;
-      const summary={
-        name:test.name,category:test.category,difficulty:test.difficulty,
+      const test = await api("/ui/tests/" + encodeURIComponent(id));
+      const settings = await loadModelSettings();
+      state.pendingRunTest = test;
+      const options = reasoningOptions(settings);
+      const selectedEffort = (test.parameters || {}).reasoning_effort || "auto";
+      const summary = {
+        name:test.name,category:test.category,difficulty:difficultyLabel(test),
         description:test.description,user_prompt:test.user_prompt,
+        model:settings.model_name,reasoning_effort:selectedEffort,
         tools:test.tool_names,parameters:test.parameters,
         expected_output:test.expected_output,
-        assertions:test.assertions,
-        judge_rubric:test.judge_rubric
+        assertions:test.assertions,judge_rubric:test.judge_rubric
       };
-      $("#modal-root").innerHTML='<div class="modal-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">EXECUTION PREVIEW</div><h2>'+esc(test.name)+'</h2></div><button class="btn small" data-action="close-modal">✕</button></div>'+
-        '<div class="code-note">Review the exact task setup. Expected output and evaluation rules remain outside the tested model context.</div>'+
-        '<div class="grid two-col" style="margin-top:12px"><div><div class="panel-title">Agent receives</div><pre class="result-block">'+esc(pretty({system_prompt:test.system_prompt,user_prompt:test.user_prompt,tools:test.tool_names,parameters:test.parameters}))+'</pre></div>'+
-        '<div><div class="panel-title">Evaluator keeps private</div><pre class="result-block">'+esc(pretty({expected_output:test.expected_output,assertions:test.assertions,judge_rubric:test.judge_rubric}))+'</pre></div></div>'+
-
-        '<div class="heading-actions" style="margin-top:15px"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="confirm-run" data-id="'+esc(id)+'">Confirm and run →</button></div></div></div>';
-    } catch(error){toast(error.message,true);}
+      $("#modal-root").innerHTML = '<div class="modal-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">EXECUTION PREVIEW</div><h2>' + esc(test.name) + '</h2></div><button class="btn small" data-action="close-modal">✕</button></div>' +
+        '<div class="code-note">The selected global Meta model will run this scenario. Evaluation rules remain outside the tested model context.</div>' +
+        '<div class="info-row"><span>Difficulty</span><strong>' + esc(difficultyLabel(test)) + '</strong></div>' +
+        '<div class="info-row"><span>Global model</span><strong>' + esc(settings.model_name) + '</strong></div>' +
+        '<div class="field" style="margin-top:12px"><label for="run-reasoning-effort">Reasoning effort for this run</label><select class="select" id="run-reasoning-effort">' +
+        options.map(x=>'<option value="' + esc(x.value) + '"' + (x.value===selectedEffort?" selected":"") + '>' + esc(x.label) + '</option>').join("") +
+        '</select><div class="hint">Higher effort can use more reasoning tokens, latency and cost. Auto preserves Meta’s model default.</div></div>' +
+        '<div class="grid two-col" style="margin-top:12px"><div><div class="panel-title">Agent receives</div><pre class="result-block">' + esc(pretty({system_prompt:test.system_prompt,user_prompt:test.user_prompt,tools:test.tool_names,parameters:test.parameters})) + '</pre></div>' +
+        '<div><div class="panel-title">Evaluator keeps private</div><pre class="result-block">' + esc(pretty({expected_output:test.expected_output,assertions:test.assertions,judge_rubric:test.judge_rubric})) + '</pre></div></div>' +
+        '<div class="heading-actions" style="margin-top:15px"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="confirm-run" data-id="' + esc(id) + '">Confirm and run →</button></div></div></div>';
+    } catch(error) { toast(error.message,true); }
   }
 
-  async function startRun(id) {
+  async function startRun(id, reasoningEffort) {
     try {
       if (state.activeStream) state.activeStream.abort();
-      const result = await api("/ui/runs",{method:"POST",body:{test_id:id}});
+      const body = {test_id:id};
+      if (reasoningEffort && reasoningEffort !== "auto") body.reasoning_effort = reasoningEffort;
+      const result = await api("/ui/runs",{method:"POST",body:body});
       const run = result.run;
       state.currentRun = run;
       state.currentRunEvents = [];
@@ -923,7 +932,7 @@
     else if(action==="new-test") openTestEditor();
     else if(action==="close-modal") closeModal();
     else if(action==="run-test") previewRun(id);
-    else if(action==="confirm-run") {closeModal();startRun(id);}
+    else if(action==="confirm-run") {const effort=$("#run-reasoning-effort")?$("#run-reasoning-effort").value:"auto";closeModal();startRun(id,effort);}
     else if(action==="inspect-test") inspectTest(id);
     else if(action==="edit-test") {
       api("/ui/tests/"+encodeURIComponent(id)).then(openTestEditor).catch(e=>toast(e.message,true));
