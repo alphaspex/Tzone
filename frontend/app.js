@@ -322,32 +322,39 @@
   function openTestEditor(test) {
     const editing = !!test;
     const data = test || {
-      name:"",category:"reasoning",difficulty:"custom",description:"",
+      name:"",category:"reasoning",difficulty:"mid",description:"",
       system_prompt:"",user_prompt:"",expected_output:"",
-      assertions:[{type:"response_nonempty"}],tags:[],parameters:{temperature:0.2,max_tokens:512}
+      assertions:[{type:"response_nonempty"}],tags:[],
+      parameters:{max_output_tokens:1024}
     };
     const categoryOptions = state.categories.map(x=>({value:x.id,label:x.name}));
-    const params = Object.assign({temperature:0.2,top_p:1,max_tokens:512,presence_penalty:0,frequency_penalty:0},data.parameters || {});
+    const difficultyOptions = state.levels.map(x=>({
+      value:x,
+      label:({easy:"Easy",mid:"Mid",hard:"Hard",expert:"Expert",adversarial:"Adversarial"})[x] || x
+    }));
+    const settings = state.modelSettings || {reasoning_efforts:[],meta_default_reasoning_effort:"model default"};
+    const params = Object.assign({max_output_tokens:1024},data.parameters || {});
+    const effortOptions = reasoningOptions(settings);
     const modal = '<div class="modal-backdrop" id="editor-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">' +
-      (editing ? "CUSTOM TEST" : "NEW CUSTOM TEST") + '</div><h2>' + (editing ? "Edit test" : "Create a test") +
+      (editing ? "CUSTOM META TEST" : "NEW META TEST") + '</div><h2>' + (editing ? "Edit test" : "Create a test") +
       '</h2></div><button class="btn small" data-action="close-modal">✕</button></div>' +
       '<form id="test-editor" class="form-grid">' +
       field("Name","test-name",data.name) +
       selectField("Category","test-category-edit",categoryOptions,data.category) +
+      selectField("Difficulty","test-difficulty",difficultyOptions,data.difficulty || "mid") +
       field("Description","test-description",data.description) +
       field("Tags (comma separated)","test-tags",(data.tags || []).join(", ")) +
-      textareaField("System prompt","test-system",data.system_prompt || "",3,"This is sent to the tested model, not the evaluator.") +
+      textareaField("System / developer instructions","test-system",data.system_prompt || "",3,"Sent to the tested model, not to the evaluator.") +
       textareaField("User prompt","test-prompt",data.user_prompt || "",5) +
-      textareaField("Expected output / goal","test-expected",data.expected_output || "",3,"Private evaluation reference. It is never sent to the tested agent.") +
-      textareaField("Assertions (JSON array)","test-assertions",pretty(data.assertions || defaultAssertions(data.category)),6,"Supported types: contains, exact, max_words, numbered_items, bullet_items, json_valid, json_keys, json_array_length, json_path_exists, tool_called, response_nonempty, headings_in_order, lines_word_range.") +
-      '<div class="field"><label for="test-temperature">Temperature</label><input class="input" id="test-temperature" type="number" min="0" max="2" step="0.1" value="' + esc(params.temperature) + '"></div>' +
-      '<div class="field"><label for="test-top-p">Top P</label><input class="input" id="test-top-p" type="number" min="0" max="1" step="0.05" value="' + esc(params.top_p == null ? 1 : params.top_p) + '"></div>' +
-      '<div class="field"><label for="test-max-tokens">Maximum output tokens</label><input class="input" id="test-max-tokens" type="number" min="1" max="8192" value="' + esc(params.max_tokens) + '"></div>' +
-      '<div class="field"><label for="test-presence">Presence penalty</label><input class="input" id="test-presence" type="number" min="-2" max="2" step="0.1" value="' + esc(params.presence_penalty || 0) + '"></div>' +
-      '<div class="field"><label for="test-frequency">Frequency penalty</label><input class="input" id="test-frequency" type="number" min="-2" max="2" step="0.1" value="' + esc(params.frequency_penalty || 0) + '"></div>' +
-
-      textareaField("Additional model parameters (JSON)","test-extra-params",pretty(Object.fromEntries(Object.entries(params).filter(([key])=>!["temperature","top_p","max_tokens","presence_penalty","frequency_penalty"].includes(key)))),4,"Optional provider-specific parameters, such as stop, response_format, seed, logit_bias, or user.") +
-      '<div class="field full"><div class="info-row"><span>Tool assignment</span><strong>Automatic from test prompt unless explicitly supplied</strong></div><div class="hint">The model sees only ordinary tool definitions selected for this scenario. Evaluation rules stay hidden.</div></div>' +
+      textareaField("Expected output / goal","test-expected",data.expected_output || "",3,"Private evaluation reference. Never sent to the tested agent.") +
+      textareaField("Assertions (JSON array)","test-assertions",pretty(data.assertions || defaultAssertions(data.category)),6,"Checks: contains, exact, max_words, min_words, numbered_items, bullet_items, json_valid, json_keys, json_array_length, json_path_exists, tool_called, stream_event_count_min, response_nonempty, headings_in_order.") +
+      '<div class="field"><label for="test-max-output">Maximum output tokens</label><input class="input" id="test-max-output" type="number" min="16" max="65536" value="' + esc(params.max_output_tokens || 1024) + '"><div class="hint">Meta Responses API · minimum 16.</div></div>' +
+      '<div class="field"><label for="test-reasoning-effort">Reasoning effort</label><select class="select" id="test-reasoning-effort">' +
+      effortOptions.map(x=>'<option value="' + esc(x.value) + '"' + (String(params.reasoning_effort || "auto")===x.value?" selected":"") + '>' + esc(x.label) + '</option>').join("") +
+      '</select><div class="hint">Auto uses Meta’s default for ' + esc(settings.model_name || settings.model || "the selected model") + '.</div></div>' +
+      textareaField("Responses text configuration (JSON)","test-text-config",pretty(params.text || {}),4,"Optional Meta text.format settings, such as a strict JSON Schema.") +
+      '<div class="field full"><div class="info-row"><span>Global model</span><strong>' + esc(settings.model_name || settings.model || "Set in Settings") + '</strong></div><div class="hint">Model selection is global. This test may override reasoning effort only.</div></div>' +
+      '<div class="field full"><div class="info-row"><span>Tool assignment</span><strong>Automatic from test prompt</strong></div><div class="hint">The model sees only normal tool definitions selected for this scenario. Evaluation rules remain private.</div></div>' +
       '<div class="field full"><div class="heading-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">' +
       (editing ? "Save changes" : "Save custom test") + '</button></div></div></form></div></div>';
     $("#modal-root").innerHTML = modal;
@@ -357,26 +364,23 @@
     });
     $("#test-editor").addEventListener("submit", async event => {
       event.preventDefault();
-      let assertions;
+      let assertions, textConfig;
       try { assertions = JSON.parse($("#test-assertions").value || "[]"); }
       catch (_) { toast("Assertions must be valid JSON.",true); return; }
       if (!Array.isArray(assertions)) { toast("Assertions must be a JSON array.",true); return; }
-      let extraParameters;
-      try { extraParameters = JSON.parse($("#test-extra-params").value || "{}"); }
-      catch (_) { toast("Additional model parameters must be valid JSON.",true); return; }
-      if (!extraParameters || Array.isArray(extraParameters) || typeof extraParameters !== "object") {
-        toast("Additional model parameters must be a JSON object.",true); return;
+      try { textConfig = JSON.parse($("#test-text-config").value || "{}"); }
+      catch (_) { toast("Responses text configuration must be valid JSON.",true); return; }
+      if (!textConfig || Array.isArray(textConfig) || typeof textConfig !== "object") {
+        toast("Responses text configuration must be a JSON object.",true); return;
       }
-      const parameters = Object.assign({},extraParameters,{
-        temperature:Number($("#test-temperature").value),
-        top_p:Number($("#test-top-p").value),
-        max_tokens:Number($("#test-max-tokens").value),
-        presence_penalty:Number($("#test-presence").value),
-        frequency_penalty:Number($("#test-frequency").value)
-      });
+      const parameters = {max_output_tokens:Number($("#test-max-output").value)};
+      const effort = $("#test-reasoning-effort").value;
+      if (effort !== "auto") parameters.reasoning_effort = effort;
+      if (Object.keys(textConfig).length) parameters.text = textConfig;
       const body = {
         name:$("#test-name").value,
         category:$("#test-category-edit").value,
+        difficulty:$("#test-difficulty").value,
         description:$("#test-description").value,
         tags:$("#test-tags").value.split(",").map(x=>x.trim()).filter(Boolean),
         system_prompt:$("#test-system").value,
