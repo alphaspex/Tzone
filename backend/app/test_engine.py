@@ -47,9 +47,15 @@ async def start_run(test_id, reasoning_effort=None):
         _LIVE.pop(oldest_id, None)
     model_id, global_effort, model = await model_settings.resolve()
     stored_effort = (case.get("parameters") or {}).get("reasoning_effort")
-    requested_effort = reasoning_effort if reasoning_effort not in (None, "", "auto") else stored_effort
-    selected_effort = model_settings.model_catalog.validate_reasoning_effort(
-        model_id, requested_effort if requested_effort not in (None, "", "auto") else global_effort)
+    if reasoning_effort not in (None, "", "auto"):
+        selected_effort = model_settings.model_catalog.validate_reasoning_effort(model_id, reasoning_effort)
+    else:
+        try:
+            selected_effort = model_settings.model_catalog.validate_reasoning_effort(model_id, stored_effort)
+        except ValueError:
+            selected_effort = None
+        if selected_effort is None:
+            selected_effort = global_effort
     if selected_effort:
         case["_reasoning_effort"] = selected_effort
     run_id = "run_" + uuid.uuid4().hex[:16]
