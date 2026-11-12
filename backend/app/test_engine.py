@@ -68,6 +68,7 @@ async def start_run(test_id, reasoning_effort=None):
     return run
 
 async def _execute_inner(run_id, case):
+    run_record = await ui_store.get_run(run_id) or {}
     started = time.monotonic()
     await ui_store.update_run(run_id,{"status":"running","started_at":_now()})
     await _publish(run_id,{"type":"status","status":"running","message":"Starting test"})
@@ -131,8 +132,8 @@ async def _execute_inner(run_id, case):
             "expected_output":case.get("expected_output"),
             "assertion_results":deterministic,"model_evaluation":judge,
             "tool_events":tool_events,"errors":[{"message":error,"stack_trace":error_trace}] if error else [],
-            "usage":usage,"judge_usage":judge_usage,"model":run.get("model") if run else None,
-            "reasoning_effort":run.get("reasoning_effort") if run else None,
+            "usage":usage,"judge_usage":judge_usage,"model":run_record.get("model"),
+            "reasoning_effort":run_record.get("reasoning_effort"),
             "stream_text_events":stream_event_count,"latency_ms":round(total_latency,2),
             "model_latency_ms":round(final_latency,2),
         }
