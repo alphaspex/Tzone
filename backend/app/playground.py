@@ -205,7 +205,7 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
 
         final_text = "".join(response_parts) or _response_text(final_response)
         final_text = final_text[:100000]
-        await ui_store.save_agent_state(session_id, input_items)
+        await ui_store.save_agent_state(session_id, input_items, model_id)
         await ui_store.save_chat_message(session_id, "assistant", final_text)
         latency_ms = (time.monotonic() - started) * 1000
         await ui_store.save_metric(session_id, "latency_ms", latency_ms)
