@@ -879,23 +879,109 @@
       ).join("")+'</div>':empty("No errors","No recent run errors."));
   }
   async function renderSettings() {
-    const content=$("#page-content");
-    let settings={};
-    try { settings=await api("/ui/settings");state.settings=settings; }
-    catch(error) { setConnected(false,"Unable to read backend settings"); }
-    content.innerHTML=heading("Settings","Connect the workspace to your Deplexo backend and inspect runtime configuration.")+
-      '<div class="grid two-col"><section class="panel"><div class="panel-header"><div><div class="panel-title">Backend connection</div><div class="panel-subtitle">The frontend calls only the /ui endpoint contract.</div></div></div>'+
-      '<form id="settings-form" class="form-grid"><div class="field full"><label for="api-base">Backend base URL</label><input class="input" id="api-base" placeholder="https://your-service.example.com" value="'+esc(state.apiBase)+'"><div class="hint">Enter the deployed Deplexo service URL, without /ui at the end. Saved in this browser only.</div></div>'+
-      '<div class="field full"><div class="heading-actions"><button class="btn primary" type="submit">Save connection</button><button class="btn" type="button" data-action="test-connection">Test connection</button></div></div></form>'+
-      '<div id="connection-result" class="hint" style="margin-top:12px"></div></section>'+
-      panel("Backend configuration","Read-only environment details",'<div class="info-row"><span>Model</span><strong>'+esc(settings.model||"—")+'</strong></div><div class="info-row"><span>Provider key</span><strong>'+ (settings.provider_configured?'<span class="badge pass">Configured</span>':'<span class="badge fail">Missing</span>')+'</strong></div><div class="info-row"><span>Cloudflare D1</span><strong>'+ (settings.d1_configured?'<span class="badge pass">Configured</span>':'<span class="badge">Memory fallback</span>')+'</strong></div><div class="info-row"><span>Max agent steps</span><strong>'+(Number(settings.max_agent_steps)===0?"Unlimited":esc(settings.max_agent_steps))+'</strong></div><div class="info-row"><span>Request timeout</span><strong>'+esc(settings.request_timeout_seconds||"—")+' s</strong></div>')+'</div>'+
-      panel("Runtime policy","Current safeguards",'<div class="info-row"><span>Worker model</span><strong>Single worker</strong></div><div class="info-row"><span>Test concurrency</span><strong>1 active test run</strong></div><div class="info-row"><span>Agent permissions</span><strong>Local tools only</strong></div><div class="info-row"><span>Evaluation visibility</span><strong>Hidden from tested agent</strong></div><div class="info-row"><span>Authentication</span><strong><span class="badge fail">Disabled</span></strong></div><p class="hint">The backend has no application authentication, as configured. Restrict public ingress before sharing this URL; any reachable caller can consume model quota.</p>');
+    const content = $("#page-content");
+    let settings = {};
+    try {
+      settings = await api("/ui/settings");
+      state.modelSettings = settings;
+      state.model = settings.model_name || settings.model || state.model;
+      state.reasoningEffort = settings.reasoning_effort || "auto";
+    } catch(error) {
+      setConnected(false,"Unable to read Meta settings");
+    }
+    const models = settings.models || [];
+    const selected = models.find(x=>x.id===settings.model) || models[0];
+    const modelOptions = models.map(item=>({
+      value:item.id,
+      label:item.name + " · $" + Number(item.input_per_million).toFixed(2) +
+        " in / $" + Number(item.output_per_million).toFixed(2) + " out per 1M" +
+        (item.contributor ? " · CONTRIBUTOR" : "")
+    }));
+    const efforts = reasoningOptions(settings);
+    const pricingRows = models.map(item =>
+      '<tr><td><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.mode) +
+      (item.contributor ? ' · training data-use terms' : '') + '</div></td><td>$' +
+      Number(item.input_per_million).toFixed(3) + '</td><td>$' +
+      Number(item.cached_input_per_million).toFixed(3) + '</td><td>$' +
+      Number(item.output_per_million).toFixed(3) + '</td></tr>'
+    ).join("");
+    const contributorSelected = !!(selected && selected.contributor);
+    content.innerHTML = heading("Settings","Choose the Meta model used globally by the harness. All tests and conversations use this model.",
+      '<button class="btn" data-action="refresh">↻ Refresh</button>') +
+      '<div class="grid two-col"><section class="panel"><div class="panel-header"><div><div class="panel-title">Meta model selection</div><div class="panel-subtitle">One global model · changes apply to new requests.</div></div></div>' +
+      '<form id="model-settings-form" class="form-grid">' +
+      '<div class="field full"><label for="meta-model-select">Active Meta model</label><select class="select" id="meta-model-select">' +
+      modelOptions.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===settings.model?" selected":"") + '>' + esc(item.label) + '</option>').join("") +
+      '</select><div class="hint">Prices are USD per 1 million input/output tokens, before any cached-input or long-context adjustments.</div></div>' +
+      '<div class="field full"><label for="meta-reasoning-effort">Default reasoning effort</label><select class="select" id="meta-reasoning-effort">' +
+      efforts.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===(settings.reasoning_effort||"auto")?" selected":"") + '>' + esc(item.label) + '</option>').join("") +
+      '</select><div class="hint" id="meta-reasoning-hint">Auto leaves the reasoning setting out of the request so Meta applies this model’s own default (' + esc(settings.meta_default_reasoning_effort || "Meta default") + '). Higher effort can increase reasoning tokens, latency and cost.</div></div>' +
+      '<div class="field full" id="contributor-warning" style="' + (contributorSelected?"":"display:none;") + '"><div class="notice warning"><strong>Contributor data-use notice</strong><p>Meta may use prompts, files, code, context and model responses sent to Contributor models to train future models. Select Save only if you explicitly accept these terms.</p></div></div>' +
+      '<div class="field full"><div class="heading-actions"><button type="submit" class="btn primary">Save Meta configuration</button></div></div></form>' +
+      '<div class="info-row"><span>Provider</span><strong>Meta Model API · ' + (settings.provider_configured?'<span class="badge pass">Key configured</span>':'<span class="badge fail">MODEL_API_KEY missing</span>') + '</strong></div>' +
+      '<div class="info-row"><span>Base URL</span><strong>' + esc(settings.base_url || "https://api.meta.ai/v1") + '</strong></div>' +
+      '</section>' +
+      '<section class="panel"><div class="panel-header"><div><div class="panel-title">Backend connection</div><div class="panel-subtitle">The static frontend calls only the /ui endpoint contract.</div></div></div>' +
+      '<form id="settings-form" class="form-grid"><div class="field full"><label for="api-base">Backend base URL</label><input class="input" id="api-base" placeholder="https://your-service.example.com" value="' + esc(state.apiBase) + '"><div class="hint">Enter the Deplexo service URL without /ui. Saved in this browser only.</div></div>' +
+      '<div class="field full"><div class="heading-actions"><button class="btn primary" type="submit">Save connection</button><button class="btn" type="button" data-action="test-connection">Test connection</button></div></div></form>' +
+      '<div id="connection-result" class="hint" style="margin-top:12px"></div>' +
+      '<div class="divider"></div><div class="info-row"><span>Cloudflare D1</span><strong>' + (settings.d1_configured?'<span class="badge pass">Configured</span>':'<span class="badge">Memory fallback</span>') + '</strong></div>' +
+      '<div class="info-row"><span>Agent steps</span><strong>Unlimited</strong></div><div class="info-row"><span>Individual request timeout</span><strong>' + esc(settings.request_timeout_seconds || 90) + ' s</strong></div><div class="info-row"><span>Test-run timeout</span><strong>None</strong></div>' +
+      '</section></div>' +
+      panel("Meta published token prices","USD per 1M tokens · cached input shown separately",'<div class="table-wrap"><table><thead><tr><th>MODEL</th><th>INPUT</th><th>CACHED INPUT</th><th>OUTPUT</th></tr></thead><tbody>' + pricingRows + '</tbody></table></div>' +
+      '<p class="hint">Muse Ember 1.0: above 200K input tokens the published rate is $0.30 input / $0.012 cached input / $1.50 output per 1M. Prices can change; this table is the catalogue configured in this backend.</p>') +
+      panel("Reasoning power","Meta effort is a model request setting, not a harness difficulty level.",'<div class="activity-list">' +
+        '<div class="info-row"><span>Minimal / Low</span><strong>Lower reasoning-token use and latency</strong></div>' +
+        '<div class="info-row"><span>Medium</span><strong>Balanced reasoning budget</strong></div>' +
+        '<div class="info-row"><span>High / XHigh</span><strong>Deeper reasoning, typically higher cost and latency</strong></div>' +
+        '<div class="info-row"><span>Max</span><strong>Highest supported effort on eligible models only</strong></div>' +
+      '</div><p class="hint">The available values change with the selected model. Meta’s default is used when Auto is selected.</p>') +
+      panel("Runtime policy","Current safeguards",'<div class="info-row"><span>Workers</span><strong>1 Uvicorn worker</strong></div><div class="info-row"><span>Backend concurrency</span><strong>2 requests</strong></div><div class="info-row"><span>Concurrent test runs</span><strong>1</strong></div><div class="info-row"><span>Agent permissions</span><strong>Bounded local tools only</strong></div><div class="info-row"><span>Reasoning replay</span><strong>Stateless encrypted replay · store:false</strong></div><div class="info-row"><span>Authentication</span><strong><span class="badge fail">Disabled</span></strong></div><p class="hint">The backend has no application authentication. Restrict public ingress; any reachable caller may consume Meta API quota.</p>');
     $("#settings-form").addEventListener("submit",e=>{
       e.preventDefault();
-      state.apiBase=$("#api-base").value.trim().replace(/\/+$/,"");
+      state.apiBase = $("#api-base").value.trim().replace(/\/+$/,"");
       localStorage.setItem("model-lab-api",state.apiBase);
       toast("Backend URL saved in this browser.");
       testConnection();
+    });
+    const modelSelect = $("#meta-model-select");
+    const effortSelect = $("#meta-reasoning-effort");
+    const warning = $("#contributor-warning");
+    function syncModelControls() {
+      const model = models.find(item=>item.id===modelSelect.value);
+      if(!model) return;
+      const opts = [{value:"auto",label:"Meta default (" + model.default_reasoning_effort + ")"}]
+        .concat((model.reasoning_efforts || []).map(value=>({value,label:value.toUpperCase()})));
+      const keep = Array.from(effortSelect.options).find(option=>option.value===effortSelect.value);
+      const wanted = keep && opts.some(item=>item.value===keep.value) ? keep.value : "auto";
+      effortSelect.innerHTML = opts.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===wanted?" selected":"") + '>' + esc(item.label) + '</option>').join("");
+      $("#meta-reasoning-hint").textContent = "Auto leaves reasoning out of the request so Meta applies this model’s default (" + model.default_reasoning_effort + "). Higher effort can increase reasoning tokens, latency and cost.";
+      warning.style.display = model.contributor ? "" : "none";
+      const warningBody = warning.querySelector("p");
+      if(warningBody) warningBody.textContent = model.contributor ?
+        "Meta may use prompts, files, code, context and model responses sent to Contributor models to train future models. Select Save only if you explicitly accept these terms." : "";
+    }
+    modelSelect.addEventListener("change",syncModelControls);
+    syncModelControls();
+    $("#model-settings-form").addEventListener("submit",async event=>{
+      event.preventDefault();
+      const model = models.find(item=>item.id===modelSelect.value);
+      if(!model){toast("Choose a supported Meta model.",true);return;}
+      if(model.contributor && !window.confirm("Contributor model data-use confirmation: Meta may use submitted prompts, code, files, context and responses to train future models. Do you explicitly accept this?")) return;
+      try {
+        const result = await api("/ui/settings",{method:"PUT",body:{
+          model:model.id,
+          reasoning_effort:effortSelect.value==="auto"?null:effortSelect.value,
+          confirm_contributor:!!model.contributor
+        }});
+        state.modelSettings = result;
+        state.model = result.model_name || result.model;
+        state.reasoningEffort = result.reasoning_effort || "auto";
+        $("#top-model").textContent = state.model;
+        setConnected(true,state.model);
+        toast("Meta model settings saved.");
+        await renderSettings();
+      } catch(error){toast(error.message,true);}
     });
   }
   async function testConnection() {
