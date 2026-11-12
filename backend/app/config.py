@@ -10,7 +10,7 @@ class Settings:
     cf_account_id: str = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
     cf_api_token: str = os.getenv("CLOUDFLARE_API_TOKEN", "")
     d1_database_id: str = os.getenv("D1_DATABASE_ID", "520245ce-7de8-4462-afe6-3de6f0f9e985")
-    max_agent_steps: int = int(os.getenv("MAX_AGENT_STEPS", "0"))
+    max_agent_steps: int = 0
     request_timeout: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "90"))
 
 settings = Settings()
