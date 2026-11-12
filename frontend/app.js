@@ -239,7 +239,7 @@
       '</div><div class="heading-actions"><button class="btn small primary" data-action="run-test" data-id="' +
       esc(test.id) + '">▷ Run test</button><button class="btn small" data-action="inspect-test" data-id="' +
       esc(test.id) + '">Details</button>' + (!test.is_builtin ?
-        '<button class="btn small" data-action="edit-test" data-id="' + esc(test.id) + '">Edit</button>' : '') +
+        '<button class="btn small" data-action="edit-test" data-id="' + esc(test.id) + '">Edit</button><button class="btn small danger" data-action="delete-test" data-id="' + esc(test.id) + '">Delete</button>' : '') +
       '</div></article>';
   }
   async function renderBuilder() {
@@ -891,6 +891,13 @@
     else if(action==="inspect-test") inspectTest(id);
     else if(action==="edit-test") {
       api("/ui/tests/"+encodeURIComponent(id)).then(openTestEditor).catch(e=>toast(e.message,true));
+    }
+    else if(action==="delete-test") {
+      if(!window.confirm("Delete this custom test? This cannot be undone.")) return;
+      api("/ui/tests/"+encodeURIComponent(id),{method:"DELETE"}).then(()=>{
+        toast("Custom test deleted.");
+        renderBuilder();
+      }).catch(e=>toast(e.message,true));
     }
     else if(action==="view-run") {
       api("/ui/runs/"+encodeURIComponent(id)).then(x=>{
