@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, Response, PlainTextResponse
-from . import playground, test_engine, test_library, tools, ui_store, store
+from . import playground, test_engine, test_library, tools, ui_store, store, model_catalog, model_settings
 from .config import settings
 
 router = APIRouter(prefix="/ui", tags=["ui"])
@@ -20,13 +20,14 @@ def _run_summary(run):
     assertion = result.get("assertion_results") or {}
     usage = result.get("usage") or {}
     return {key:run.get(key) for key in
-            ("id","test_id","test_name","category","difficulty","status","passed",
+            ("id","test_id","test_name","category","difficulty","difficulty_label","model","reasoning_effort","status","passed",
              "created_at","started_at","completed_at","latency_ms","error")} | {
             "assertion_score":assertion.get("score"),
             "assertions_passed":assertion.get("passed_count"),
             "assertions_total":assertion.get("total"),
             "judge_score":(result.get("model_evaluation") or {}).get("score"),
             "total_tokens":usage.get("total_tokens"),
+            "estimated_cost_usd":run.get("estimated_cost_usd") or result.get("estimated_cost_usd"),
         }
 
 def _current_memory_mb():
@@ -42,7 +43,7 @@ def _current_memory_mb():
     except Exception:
         return None
 
-def _validate_custom_test(body, existing=None):
+async def _validate_custom_test(body, existing=None):
     data = dict(existing or {})
     data.update(body or {})
     name = str(data.get("name","")).strip()
@@ -57,12 +58,17 @@ def _validate_custom_test(body, existing=None):
     assertions = data.get("assertions") or []
     if not isinstance(assertions,list) or len(assertions) > 25:
         raise HTTPException(422,"assertions must be a list of at most 25 rules")
-    parameters = playground.normalize_parameters(data.get("parameters") or {})
-    parameters.setdefault("max_tokens",512)
+    configured = await model_settings.get_settings()
+    try:
+        parameters = playground.normalize_parameters(data.get("parameters") or {}, configured["model"])
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc))
+    parameters.setdefault("max_output_tokens", 1024)
     return {
         "id":data.get("id") or "custom_" + uuid.uuid4().hex[:16],
         "name":name,"category":category,
-        "difficulty":str(data.get("difficulty","custom")),
+        "difficulty":str(data.get("difficulty","mid")),
+        "difficulty_label":test_library.LEVEL_METADATA.get(str(data.get("difficulty","mid")), {}).get("label", "Custom"),
         "description":str(data.get("description",""))[:1000],
         "system_prompt":str(data.get("system_prompt",""))[:8000],
         "user_prompt":prompt,
@@ -83,7 +89,7 @@ async def dashboard():
     passed = [r for r in completed if r.get("passed") is True]
     active = [r for r in runs if r.get("status") in ("queued","running")]
     return {
-        "model":settings.model,"provider_configured":bool(settings.zai_api_key),
+        "model":(await model_settings.get_settings())["model"],"model_name":(await model_settings.get_settings())["model_name"],"provider_configured":bool(settings.meta_api_key),
         "d1_configured":store.configured(),"system_memory_mb":_current_memory_mb(),
         "runs_total":len(runs),"runs_completed":len(completed),
         "runs_passed":len(passed),"pass_rate":round(len(passed)/len(completed),4) if completed else None,
@@ -104,42 +110,51 @@ async def system_status():
         "memory_peak_mb":round(usage.ru_maxrss/1024,2),
         "cpu_count":os.cpu_count(),"load_average":load,
         "process_cpu_seconds":round(usage.ru_utime+usage.ru_stime,3),
-        "provider_configured":bool(settings.zai_api_key),
+        "provider_configured":bool(settings.meta_api_key),
         "d1_configured":store.configured(),
-        "model":settings.model,"timestamp":datetime.now(timezone.utc).isoformat(),
+        "model":(await model_settings.get_settings())["model"],"timestamp":datetime.now(timezone.utc).isoformat(),
     }
 
 @router.get("/model/status")
 async def model_status():
-    return {"model":settings.model,"provider":"z.ai",
-            "base_url":settings.zai_base_url,"configured":bool(settings.zai_api_key),
-            "streaming":True}
+    configured = await model_settings.get_settings()
+    return {
+        "model": configured["model"], "model_name": configured["model_name"],
+        "provider": "Meta Model API", "base_url": settings.meta_base_url,
+        "configured": bool(settings.meta_api_key), "streaming": True,
+        "reasoning_effort": configured["reasoning_effort"],
+        "default_reasoning_effort": configured["meta_default_reasoning_effort"],
+    }
+
+
+@router.get("/models")
+async def list_models():
+    return {"provider": "Meta Model API", "models": model_catalog.public_models()}
+
 
 @router.get("/model/config")
 async def model_config():
+    configured = await model_settings.get_settings()
     return {
-        "model":settings.model,
-        "supported_parameters":{
-            "temperature":{"type":"number","min":0,"max":2},
-            "top_p":{"type":"number","min":0,"max":1},
-            "max_tokens":{"type":"integer","min":1,"max":8192},
-            "presence_penalty":{"type":"number","min":-2,"max":2},
-            "frequency_penalty":{"type":"number","min":-2,"max":2},
-            "stop":{"type":["string","array"]},
-            "response_format":{"type":"object"},
-            "seed":{"type":"integer"},
-            "logit_bias":{"type":"object"},
-            "n":{"type":"integer","min":1,"max":1},
-            "user":{"type":"string"},
+        "provider": "Meta Model API", "model": configured["model"],
+        "reasoning_efforts": configured["reasoning_efforts"],
+        "supported_parameters": {
+            "max_output_tokens": {"type": "integer", "min": 16, "max": 65536},
+            "reasoning.effort": {"enum": configured["reasoning_efforts"]},
+            "temperature": {"type": "number", "min": 0, "max": 2, "mutually_exclusive_with": "top_p"},
+            "top_p": {"type": "number", "min": 0, "max": 1, "mutually_exclusive_with": "temperature"},
+            "text.format": {"type": "object", "description": "Responses API output formatting and JSON Schema."},
         },
-        "defaults":{"temperature":0.4,"max_tokens":1024},
-        "note":"Parameters are passed through to the configured OpenAI-compatible provider. Provider/model support may differ.",
+        "defaults": {"max_output_tokens": 2048, "reasoning_effort": "Meta model default"},
+        "unsupported": ["max_tokens", "presence_penalty", "frequency_penalty", "stop", "logit_bias", "logprobs", "n", "stream_options"],
     }
 
 @router.get("/tests/categories")
 async def test_categories():
     return {"categories":test_library.category_summary(),
-            "levels":test_library.LEVELS,"built_in_count":test_library.count()}
+            "levels":test_library.LEVELS,
+            "level_details":test_library.LEVEL_METADATA,
+            "built_in_count":test_library.count()}
 
 @router.get("/tests")
 async def list_tests(category: str | None = None, difficulty: str | None = None):
@@ -166,7 +181,7 @@ async def get_test(test_id: str):
 
 @router.post("/tests")
 async def create_test(body: dict):
-    case = _validate_custom_test(body)
+    case = await _validate_custom_test(body)
     await ui_store.save_custom_test(case)
     return {"test":case,"saved":True}
 
@@ -177,7 +192,7 @@ async def update_test(test_id: str, body: dict):
     existing = await ui_store.get_custom_test(test_id)
     if not existing:
         raise HTTPException(404,"custom test not found")
-    case = _validate_custom_test(body,existing)
+    case = await _validate_custom_test(body,existing)
     case["id"] = test_id
     await ui_store.save_custom_test(case)
     return {"test":case,"saved":True}
@@ -197,11 +212,13 @@ async def start_test_run(body: dict):
     if not test_id:
         raise HTTPException(422,"test_id is required")
     try:
-        run = await test_engine.start_run(test_id)
+        run = await test_engine.start_run(test_id, body.get("reasoning_effort"))
     except KeyError as exc:
         raise HTTPException(404,str(exc))
     except RuntimeError as exc:
         raise HTTPException(409,str(exc))
+    except ValueError as exc:
+        raise HTTPException(422,str(exc))
     return {"run":_run_summary(run),"stream_url":f"/ui/runs/{run['id']}/stream"}
 
 @router.get("/runs")
@@ -317,7 +334,8 @@ async def stream_test_run(run_id: str):
 
 @router.get("/agent")
 async def agent_info():
-    return {"model":settings.model,"mode":"direct-playground",
+    configured = await model_settings.get_settings()
+    return {"model":configured["model"],"mode":"direct-playground",
             "free_chat":True,"test_backed_chat":True,
             "tool_selection":"automatic by task intent or selected test scenario",
             "evaluation_visible_to_agent":False}
@@ -346,6 +364,9 @@ async def agent_chat(request: Request):
     selected_tools = case.get("tool_names",[]) if case else None
     system_prompt = (case or {}).get("system_prompt","")
     parameters = body.get("parameters") or ((case or {}).get("parameters") or {})
+    if body.get("reasoning_effort") not in (None, "", "auto"):
+        parameters = dict(parameters)
+        parameters["reasoning_effort"] = body["reasoning_effort"]
     async def generate():
         async for event in playground.stream_turn(session_id,user_text,
                     tool_names=selected_tools,parameters=parameters,system_prompt=system_prompt):
@@ -406,9 +427,32 @@ async def logs(limit: int = 100):
 
 @router.get("/settings")
 async def ui_settings():
-    return {"model":settings.model,"base_url":settings.zai_base_url,
-            "max_agent_steps":settings.max_agent_steps,
-            "request_timeout_seconds":settings.request_timeout,
-            "d1_configured":store.configured(),"provider_configured":bool(settings.zai_api_key),
-            "authentication_enabled":False,
-            "warning":"No backend authentication is configured. Restrict service ingress before public exposure."}
+    configured = await model_settings.get_settings()
+    return {
+        **configured,
+        "models": model_catalog.public_models(),
+        "base_url": settings.meta_base_url,
+        "max_agent_steps": settings.max_agent_steps,
+        "request_timeout_seconds": settings.request_timeout,
+        "d1_configured": store.configured(),
+        "authentication_enabled": False,
+        "warning": "No backend authentication is configured. Restrict service ingress before public exposure.",
+    }
+
+
+@router.put("/settings")
+async def update_ui_settings(body: dict):
+    contributor = str(body.get("model", "")).endswith("-contributor")
+    if contributor and body.get("confirm_contributor") is not True:
+        raise HTTPException(428, "Contributor model selection requires explicit data-use confirmation.")
+    try:
+        updated = await model_settings.update_settings(
+            body.get("model"), body.get("reasoning_effort"))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return {
+        **updated,
+        "models": model_catalog.public_models(),
+        "d1_configured": store.configured(),
+        "request_timeout_seconds": settings.request_timeout,
+    }

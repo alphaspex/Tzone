@@ -1,16 +1,19 @@
-"""Environment configuration. Input: process environment. Output: immutable settings."""
+"""Environment configuration. Input: process environment. Output: immutable Meta API settings."""
 import os
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class Settings:
-    zai_api_key: str = os.getenv("ZAI_API_KEY", "")
-    zai_base_url: str = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4")
-    model: str = os.getenv("MODEL_NAME", "glm-4.7-flash")
+    meta_api_key: str = os.getenv("MODEL_API_KEY", "")
+    meta_base_url: str = os.getenv("META_API_BASE_URL", "https://api.meta.ai/v1")
+    default_model: str = os.getenv("MODEL_NAME", "muse-spark-1.3")
     cf_account_id: str = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
     cf_api_token: str = os.getenv("CLOUDFLARE_API_TOKEN", "")
     d1_database_id: str = os.getenv("D1_DATABASE_ID", "520245ce-7de8-4462-afe6-3de6f0f9e985")
     max_agent_steps: int = 0
     request_timeout: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "90"))
+    max_request_bytes: int = int(os.getenv("MAX_REQUEST_BYTES", str(16 * 1024 * 1024)))
+
 
 settings = Settings()

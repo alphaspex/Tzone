@@ -8,7 +8,9 @@
     page: "overview",
     apiBase: localStorage.getItem("model-lab-api") || "",
     connected: false,
-    model: "GLM-4.7-Flash",
+    model: "Muse Spark 1.3",
+    modelSettings: null,
+    reasoningEffort: "auto",
     categories: [],
     levels: [],
     tests: [],
@@ -179,7 +181,7 @@
   async function getDashboard() {
     try {
       const result = await api("/ui/dashboard");
-      state.model = result.model || state.model;
+      state.model = result.model_name || result.model || state.model;
       setConnected(true, state.model);
       return result;
     } catch (error) {
@@ -197,7 +199,7 @@
     const active = data.active_runs || [];
     const rows = runs.length ? '<div class="table-wrap"><table><thead><tr><th>TEST</th><th>STATUS</th><th>RESULT</th><th>LATENCY</th><th>CREATED</th><th></th></tr></thead><tbody>' +
       runs.map(run => '<tr><td><strong>' + esc(run.test_name || run.test_id) + '</strong><div class="muted">' +
-        esc(run.category || "") + ' · ' + esc(run.difficulty || "") + '</div></td><td>' +
+        esc(run.category || "") + ' · ' + esc(run.difficulty_label || run.difficulty || "") + '</div></td><td>' +
         statusBadge(run.status) + '</td><td>' + statusBadge(run.status, run.passed) +
         '</td><td>' + formatDuration(run.latency_ms) + '</td><td>' + formatTime(run.created_at) +
         '</td><td><button class="btn small" data-action="view-run" data-id="' + esc(run.id) + '">Open</button></td></tr>').join("") +
@@ -234,11 +236,34 @@
         '</strong></div>') +
       panel("Workspace shortcuts","Jump into a workflow",'<div class="activity-list">' +
         '<div class="activity-item"><span class="activity-marker"></span><div><button class="text-link" data-page="builder">Build a manual test →</button><div class="activity-meta">Create and save your own prompt and assertions.</div></div></div>' +
-        '<div class="activity-item"><span class="activity-marker green"></span><div><button class="text-link" data-page="agent">Open Harness Agent →</button><div class="activity-meta">Chat with GLM and watch its tool usage live.</div></div></div>' +
+        '<div class="activity-item"><span class="activity-marker green"></span><div><button class="text-link" data-page="agent">Open Harness Agent →</button><div class="activity-meta">Chat with Muse and watch its tool usage live.</div></div></div>' +
         '<div class="activity-item"><span class="activity-marker"></span><div><button class="text-link" data-page="metrics">Inspect model metrics →</button><div class="activity-meta">Review latency and token usage.</div></div></div></div>') +
       '</div>';
   }
 
+  async function loadModelSettings(force) {
+    if (state.modelSettings && !force) return state.modelSettings;
+    const result = await api("/ui/settings");
+    state.modelSettings = result;
+    state.model = result.model_name || result.model || state.model;
+    state.reasoningEffort = result.reasoning_effort || "auto";
+    const top = $("#top-model");
+    if (top) top.textContent = state.model;
+    return result;
+  }
+  function reasoningOptions(settings) {
+    const labels = {
+      minimal:"Minimal — lowest effort", low:"Low — light reasoning",
+      medium:"Medium — balanced reasoning", high:"High — deeper reasoning",
+      xhigh:"XHigh — very deep reasoning", max:"Max — maximum supported"
+    };
+    const options = [{value:"auto",label:"Meta default (" + (settings.meta_default_reasoning_effort || "model default") + ")"}];
+    (settings.reasoning_efforts || []).forEach(value => options.push({value,label:labels[value] || value}));
+    return options;
+  }
+  function difficultyLabel(test) {
+    return test.difficulty_label || ({easy:"Easy",mid:"Mid",hard:"Hard",expert:"Expert",adversarial:"Adversarial"}[test.difficulty]) || test.difficulty || "Custom";
+  }
   async function loadTestCatalog() {
     const [categories,tests] = await Promise.all([api("/ui/tests/categories"),api("/ui/tests")]);
     state.categories = categories.categories || [];
@@ -247,7 +272,7 @@
   }
   function testCard(test) {
     return '<article class="test-card"><div class="test-card-top"><span class="badge info">' +
-      esc(test.category.replace(/_/g," ")) + '</span><span class="badge">' + esc(test.difficulty) +
+      esc(test.category.replace(/_/g," ")) + '</span><span class="badge">' + esc(difficultyLabel(test)) +
       '</span></div><h3>' + esc(test.name) + '</h3><p>' + esc(test.description || test.user_prompt || "") +
       '</p><div class="tags">' + (test.is_builtin ? '<span class="tag">Built-in</span>' : '<span class="tag">Custom</span>') +
       (test.tool_names || []).map(name => '<span class="tag">' + esc(name) + '</span>').join("") +
@@ -259,9 +284,9 @@
   }
   async function renderBuilder() {
     const content = $("#page-content");
-    await loadTestCatalog();
+    await Promise.all([loadTestCatalog(),loadModelSettings()]);
     const categoryOptions = [{value:"",label:"All categories"}].concat(state.categories.map(x=>({value:x.id,label:x.name})));
-    const levelOptions = [{value:"",label:"All levels"}].concat(state.levels.map(x=>({value:x,label:x})));
+    const levelOptions = [{value:"",label:"All levels"}].concat(state.levels.map(x=>({value:x,label:({easy:"Easy",mid:"Mid",hard:"Hard",expert:"Expert",adversarial:"Adversarial"})[x] || x})));
     content.innerHTML = heading("Test Builder","Browse the preloaded test library or create your own custom test.",
       '<button class="btn primary" data-action="new-test">＋ Create custom test</button>') +
       '<div class="toolbar"><input class="input" id="test-search" placeholder="Search tests…" /><select class="select" id="test-category">' +
@@ -272,7 +297,7 @@
       '<div class="grid stats-grid">' + statCard("Built-in tests",state.tests.filter(x=>x.is_builtin).length,"Ready to run","✳") +
       statCard("Custom tests",state.tests.filter(x=>!x.is_builtin).length,"Created by you","＋") +
       statCard("Categories",state.categories.length,"Capability areas","▤") +
-      statCard("Difficulty levels",state.levels.length,"Foundation to adversarial","↗") + '</div>' +
+      statCard("Difficulty levels",state.levels.length,"Easy to adversarial","↗") + '</div>' +
       '<div class="test-list" id="test-list">' + state.tests.map(testCard).join("") + '</div>';
     $("#test-search").addEventListener("input",filterTests);
     $("#test-category").addEventListener("change",filterTests);
@@ -302,32 +327,39 @@
   function openTestEditor(test) {
     const editing = !!test;
     const data = test || {
-      name:"",category:"reasoning",difficulty:"custom",description:"",
+      name:"",category:"reasoning",difficulty:"mid",description:"",
       system_prompt:"",user_prompt:"",expected_output:"",
-      assertions:[{type:"response_nonempty"}],tags:[],parameters:{temperature:0.2,max_tokens:512}
+      assertions:[{type:"response_nonempty"}],tags:[],
+      parameters:{max_output_tokens:1024}
     };
     const categoryOptions = state.categories.map(x=>({value:x.id,label:x.name}));
-    const params = Object.assign({temperature:0.2,top_p:1,max_tokens:512,presence_penalty:0,frequency_penalty:0},data.parameters || {});
+    const difficultyOptions = state.levels.map(x=>({
+      value:x,
+      label:({easy:"Easy",mid:"Mid",hard:"Hard",expert:"Expert",adversarial:"Adversarial"})[x] || x
+    }));
+    const settings = state.modelSettings || {reasoning_efforts:[],meta_default_reasoning_effort:"model default"};
+    const params = Object.assign({max_output_tokens:1024},data.parameters || {});
+    const effortOptions = reasoningOptions(settings);
     const modal = '<div class="modal-backdrop" id="editor-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">' +
-      (editing ? "CUSTOM TEST" : "NEW CUSTOM TEST") + '</div><h2>' + (editing ? "Edit test" : "Create a test") +
+      (editing ? "CUSTOM META TEST" : "NEW META TEST") + '</div><h2>' + (editing ? "Edit test" : "Create a test") +
       '</h2></div><button class="btn small" data-action="close-modal">✕</button></div>' +
       '<form id="test-editor" class="form-grid">' +
       field("Name","test-name",data.name) +
       selectField("Category","test-category-edit",categoryOptions,data.category) +
+      selectField("Difficulty","test-difficulty",difficultyOptions,data.difficulty || "mid") +
       field("Description","test-description",data.description) +
       field("Tags (comma separated)","test-tags",(data.tags || []).join(", ")) +
-      textareaField("System prompt","test-system",data.system_prompt || "",3,"This is sent to the tested model, not the evaluator.") +
+      textareaField("System / developer instructions","test-system",data.system_prompt || "",3,"Sent to the tested model, not to the evaluator.") +
       textareaField("User prompt","test-prompt",data.user_prompt || "",5) +
-      textareaField("Expected output / goal","test-expected",data.expected_output || "",3,"Private evaluation reference. It is never sent to the tested agent.") +
-      textareaField("Assertions (JSON array)","test-assertions",pretty(data.assertions || defaultAssertions(data.category)),6,"Supported types: contains, exact, max_words, numbered_items, bullet_items, json_valid, json_keys, json_array_length, json_path_exists, tool_called, response_nonempty, headings_in_order, lines_word_range.") +
-      '<div class="field"><label for="test-temperature">Temperature</label><input class="input" id="test-temperature" type="number" min="0" max="2" step="0.1" value="' + esc(params.temperature) + '"></div>' +
-      '<div class="field"><label for="test-top-p">Top P</label><input class="input" id="test-top-p" type="number" min="0" max="1" step="0.05" value="' + esc(params.top_p == null ? 1 : params.top_p) + '"></div>' +
-      '<div class="field"><label for="test-max-tokens">Maximum output tokens</label><input class="input" id="test-max-tokens" type="number" min="1" max="8192" value="' + esc(params.max_tokens) + '"></div>' +
-      '<div class="field"><label for="test-presence">Presence penalty</label><input class="input" id="test-presence" type="number" min="-2" max="2" step="0.1" value="' + esc(params.presence_penalty || 0) + '"></div>' +
-      '<div class="field"><label for="test-frequency">Frequency penalty</label><input class="input" id="test-frequency" type="number" min="-2" max="2" step="0.1" value="' + esc(params.frequency_penalty || 0) + '"></div>' +
-
-      textareaField("Additional model parameters (JSON)","test-extra-params",pretty(Object.fromEntries(Object.entries(params).filter(([key])=>!["temperature","top_p","max_tokens","presence_penalty","frequency_penalty"].includes(key)))),4,"Optional provider-specific parameters, such as stop, response_format, seed, logit_bias, or user.") +
-      '<div class="field full"><div class="info-row"><span>Tool assignment</span><strong>Automatic from test prompt unless explicitly supplied</strong></div><div class="hint">The model sees only ordinary tool definitions selected for this scenario. Evaluation rules stay hidden.</div></div>' +
+      textareaField("Expected output / goal","test-expected",data.expected_output || "",3,"Private evaluation reference. Never sent to the tested agent.") +
+      textareaField("Assertions (JSON array)","test-assertions",pretty(data.assertions || defaultAssertions(data.category)),6,"Checks: contains, exact, max_words, min_words, numbered_items, bullet_items, json_valid, json_keys, json_array_length, json_path_exists, tool_called, stream_event_count_min, response_nonempty, headings_in_order.") +
+      '<div class="field"><label for="test-max-output">Maximum output tokens</label><input class="input" id="test-max-output" type="number" min="16" max="65536" value="' + esc(params.max_output_tokens || 1024) + '"><div class="hint">Meta Responses API · minimum 16.</div></div>' +
+      '<div class="field"><label for="test-reasoning-effort">Reasoning effort</label><select class="select" id="test-reasoning-effort">' +
+      effortOptions.map(x=>'<option value="' + esc(x.value) + '"' + (String(params.reasoning_effort || "auto")===x.value?" selected":"") + '>' + esc(x.label) + '</option>').join("") +
+      '</select><div class="hint">Auto uses Meta’s default for ' + esc(settings.model_name || settings.model || "the selected model") + '.</div></div>' +
+      textareaField("Responses text configuration (JSON)","test-text-config",pretty(params.text || {}),4,"Optional Meta text.format settings, such as a strict JSON Schema.") +
+      '<div class="field full"><div class="info-row"><span>Global model</span><strong>' + esc(settings.model_name || settings.model || "Set in Settings") + '</strong></div><div class="hint">Model selection is global. This test may override reasoning effort only.</div></div>' +
+      '<div class="field full"><div class="info-row"><span>Tool assignment</span><strong>Automatic from test prompt</strong></div><div class="hint">The model sees only normal tool definitions selected for this scenario. Evaluation rules remain private.</div></div>' +
       '<div class="field full"><div class="heading-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">' +
       (editing ? "Save changes" : "Save custom test") + '</button></div></div></form></div></div>';
     $("#modal-root").innerHTML = modal;
@@ -337,26 +369,23 @@
     });
     $("#test-editor").addEventListener("submit", async event => {
       event.preventDefault();
-      let assertions;
+      let assertions, textConfig;
       try { assertions = JSON.parse($("#test-assertions").value || "[]"); }
       catch (_) { toast("Assertions must be valid JSON.",true); return; }
       if (!Array.isArray(assertions)) { toast("Assertions must be a JSON array.",true); return; }
-      let extraParameters;
-      try { extraParameters = JSON.parse($("#test-extra-params").value || "{}"); }
-      catch (_) { toast("Additional model parameters must be valid JSON.",true); return; }
-      if (!extraParameters || Array.isArray(extraParameters) || typeof extraParameters !== "object") {
-        toast("Additional model parameters must be a JSON object.",true); return;
+      try { textConfig = JSON.parse($("#test-text-config").value || "{}"); }
+      catch (_) { toast("Responses text configuration must be valid JSON.",true); return; }
+      if (!textConfig || Array.isArray(textConfig) || typeof textConfig !== "object") {
+        toast("Responses text configuration must be a JSON object.",true); return;
       }
-      const parameters = Object.assign({},extraParameters,{
-        temperature:Number($("#test-temperature").value),
-        top_p:Number($("#test-top-p").value),
-        max_tokens:Number($("#test-max-tokens").value),
-        presence_penalty:Number($("#test-presence").value),
-        frequency_penalty:Number($("#test-frequency").value)
-      });
+      const parameters = {max_output_tokens:Number($("#test-max-output").value)};
+      const effort = $("#test-reasoning-effort").value;
+      if (effort !== "auto") parameters.reasoning_effort = effort;
+      if (Object.keys(textConfig).length) parameters.text = textConfig;
       const body = {
         name:$("#test-name").value,
         category:$("#test-category-edit").value,
+        difficulty:$("#test-difficulty").value,
         description:$("#test-description").value,
         tags:$("#test-tags").value.split(",").map(x=>x.trim()).filter(Boolean),
         system_prompt:$("#test-system").value,
@@ -381,7 +410,7 @@
       const result = await api("/ui/tests/" + encodeURIComponent(id));
       state.selectedTest = result;
       const safeView = {
-        name:result.name,category:result.category,difficulty:result.difficulty,
+        name:result.name,category:result.category,difficulty:result.difficulty_label || difficultyLabel(result),
         description:result.description,user_prompt:result.user_prompt,
         expected_output:result.expected_output,assertions:result.assertions,
         tools:result.tool_names,parameters:result.parameters,
@@ -398,29 +427,40 @@
 
   async function previewRun(id) {
     try {
-      const test=await api("/ui/tests/"+encodeURIComponent(id));
-      state.pendingRunTest=test;
-      const summary={
-        name:test.name,category:test.category,difficulty:test.difficulty,
+      const test = await api("/ui/tests/" + encodeURIComponent(id));
+      const settings = await loadModelSettings();
+      state.pendingRunTest = test;
+      const options = reasoningOptions(settings);
+      const availableEfforts = settings.reasoning_efforts || [];
+      const storedEffort = (test.parameters || {}).reasoning_effort || "auto";
+      const selectedEffort = storedEffort==="auto" || availableEfforts.includes(storedEffort) ? storedEffort : "auto";
+      const summary = {
+        name:test.name,category:test.category,difficulty:difficultyLabel(test),
         description:test.description,user_prompt:test.user_prompt,
+        model:settings.model_name,reasoning_effort:selectedEffort,
         tools:test.tool_names,parameters:test.parameters,
         expected_output:test.expected_output,
-        assertions:test.assertions,
-        judge_rubric:test.judge_rubric
+        assertions:test.assertions,judge_rubric:test.judge_rubric
       };
-      $("#modal-root").innerHTML='<div class="modal-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">EXECUTION PREVIEW</div><h2>'+esc(test.name)+'</h2></div><button class="btn small" data-action="close-modal">✕</button></div>'+
-        '<div class="code-note">Review the exact task setup. Expected output and evaluation rules remain outside the tested model context.</div>'+
-        '<div class="grid two-col" style="margin-top:12px"><div><div class="panel-title">Agent receives</div><pre class="result-block">'+esc(pretty({system_prompt:test.system_prompt,user_prompt:test.user_prompt,tools:test.tool_names,parameters:test.parameters}))+'</pre></div>'+
-        '<div><div class="panel-title">Evaluator keeps private</div><pre class="result-block">'+esc(pretty({expected_output:test.expected_output,assertions:test.assertions,judge_rubric:test.judge_rubric}))+'</pre></div></div>'+
-
-        '<div class="heading-actions" style="margin-top:15px"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="confirm-run" data-id="'+esc(id)+'">Confirm and run →</button></div></div></div>';
-    } catch(error){toast(error.message,true);}
+      $("#modal-root").innerHTML = '<div class="modal-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">EXECUTION PREVIEW</div><h2>' + esc(test.name) + '</h2></div><button class="btn small" data-action="close-modal">✕</button></div>' +
+        '<div class="code-note">The selected global Meta model will run this scenario. Evaluation rules remain outside the tested model context.</div>' +
+        '<div class="info-row"><span>Difficulty</span><strong>' + esc(difficultyLabel(test)) + '</strong></div>' +
+        '<div class="info-row"><span>Global model</span><strong>' + esc(settings.model_name) + '</strong></div>' +
+        '<div class="field" style="margin-top:12px"><label for="run-reasoning-effort">Reasoning effort for this run</label><select class="select" id="run-reasoning-effort">' +
+        options.map(x=>'<option value="' + esc(x.value) + '"' + (x.value===selectedEffort?" selected":"") + '>' + esc(x.label) + '</option>').join("") +
+        '</select><div class="hint">Higher effort can use more reasoning tokens, latency and cost. Auto preserves Meta’s model default.</div></div>' +
+        '<div class="grid two-col" style="margin-top:12px"><div><div class="panel-title">Agent receives</div><pre class="result-block">' + esc(pretty({system_prompt:test.system_prompt,user_prompt:test.user_prompt,tools:test.tool_names,parameters:test.parameters})) + '</pre></div>' +
+        '<div><div class="panel-title">Evaluator keeps private</div><pre class="result-block">' + esc(pretty({expected_output:test.expected_output,assertions:test.assertions,judge_rubric:test.judge_rubric})) + '</pre></div></div>' +
+        '<div class="heading-actions" style="margin-top:15px"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="confirm-run" data-id="' + esc(id) + '">Confirm and run →</button></div></div></div>';
+    } catch(error) { toast(error.message,true); }
   }
 
-  async function startRun(id) {
+  async function startRun(id, reasoningEffort) {
     try {
       if (state.activeStream) state.activeStream.abort();
-      const result = await api("/ui/runs",{method:"POST",body:{test_id:id}});
+      const body = {test_id:id};
+      if (reasoningEffort && reasoningEffort !== "auto") body.reasoning_effort = reasoningEffort;
+      const result = await api("/ui/runs",{method:"POST",body:body});
       const run = result.run;
       state.currentRun = run;
       state.currentRunEvents = [];
@@ -487,11 +527,14 @@
       (["running","queued"].includes(run.status) ? '<button class="btn danger small" data-action="cancel-run" data-id="' + esc(run.id) + '">■ Cancel</button>' : '') +
       '<button class="btn small" data-action="export-run" data-id="' + esc(run.id) + '" data-format="json">JSON</button>' +
       '<button class="btn small" data-action="export-run" data-id="' + esc(run.id) + '" data-format="markdown">Markdown</button></div></div>' +
+      '<div class="info-row"><span>Meta model</span><strong>' + esc(run.model || result.model || "—") + '</strong></div><div class="info-row"><span>Reasoning effort</span><strong>' + esc(run.reasoning_effort || result.reasoning_effort || "Meta default") + '</strong></div>' +
       '<div class="grid stats-grid">' +
       statCard("Latency",formatDuration(run.latency_ms),"End-to-end","◷") +
       statCard("Assertions",assertion.total == null ? "—" : (assertion.passed_count || 0) + "/" + assertion.total,"Deterministic checks","✓") +
       statCard("Judge score",result.model_evaluation && result.model_evaluation.score != null ? result.model_evaluation.score + "/100" : "—","Separate evaluator","◎") +
-      statCard("Total tokens",(result.usage || {}).total_tokens || "—","Provider usage","▤") + '</div>' +
+      statCard("Estimated cost",result.estimated_cost_usd==null?"—":"$"+Number(result.estimated_cost_usd).toFixed(6),"Meta token-rate estimate","$") +
+      statCard("Total tokens",(result.usage || {}).total_tokens || "—","Meta token usage","▤") +
+      statCard("Estimated cost",result.estimated_cost_usd==null?"—":"$"+Number(result.estimated_cost_usd).toFixed(6),"Input/output token-rate estimate","$") + '</div>' +
       panel("Live activity","Token stream, agent activity, tools, metrics and evaluation",'<div class="event-stream" id="run-events">' +
         events.slice(-180).map(renderEvent).join("") + (events.length ? "" : '<div class="muted">Waiting for run events…</div>') + '</div>') +
       (run.result ? '<div class="grid two-col">' +
@@ -611,47 +654,56 @@
   }
 
   async function renderAgent() {
-    const content=$("#page-content");
-    let testOptions=[];
+    const content = $("#page-content");
+    let testOptions = [];
+    let settings = {};
     try {
-      if (!state.tests.length) await loadTestCatalog();
-      testOptions=state.tests;
+      await Promise.all([state.tests.length?Promise.resolve():loadTestCatalog(),loadModelSettings()]);
+      testOptions = state.tests;
+      settings = state.modelSettings || {};
     } catch (_) {}
-    const selected=state.selectedTest;
-    content.innerHTML=heading("Harness Agent","Chat directly with the same GLM agent. Watch its tokens and tool calls as they happen.",
+    const selected = state.selectedTest;
+    const efforts = reasoningOptions(settings);
+    content.innerHTML = heading("Harness Agent","Chat directly with the globally selected Meta model. Watch streamed output and local tool calls.",
       '<button class="btn" data-action="new-chat">＋ New conversation</button>') +
       '<div class="split-layout">' +
-      '<section class="panel chat-panel"><div class="panel-header"><div><div class="panel-title">Agent playground</div><div class="panel-subtitle">Live streaming · automatic tool selection · conversation history</div></div><span class="badge pass">Autonomous</span></div>' +
+      '<section class="panel chat-panel"><div class="panel-header"><div><div class="panel-title">Agent playground</div><div class="panel-subtitle">Meta Responses API · live streaming · automatic tool selection · conversation history</div></div><span class="badge pass">Autonomous</span></div>' +
       '<div class="toolbar"><select class="select" id="chat-mode"><option value="free">Free chat · auto tools</option><option value="test">Test-backed chat · selected tools</option></select>' +
-      '<select class="select" id="chat-test"><option value="">Choose a test…</option>' + testOptions.map(x=>'<option value="'+esc(x.id)+'" '+(selected&&selected.id===x.id?"selected":"")+'>'+esc(x.name)+'</option>').join("")+'</select></div>' +
+      '<select class="select" id="chat-test"><option value="">Choose a test…</option>' + testOptions.map(x=>'<option value="' + esc(x.id) + '" ' + (selected&&selected.id===x.id?"selected":"") + '>' + esc(x.name) + '</option>').join("") + '</select>' +
+      '<select class="select" id="chat-reasoning-effort">' + efforts.map(x=>'<option value="' + esc(x.value) + '"' + (x.value===(state.reasoningEffort||"auto")?" selected":"") + '>' + esc(x.label) + '</option>').join("") + '</select></div>' +
+      '<div class="hint">Global model: ' + esc(settings.model_name || settings.model || "Loading") + '. Reasoning effort can be overridden for this conversation.</div>' +
       '<div id="chat-messages" class="chat-messages">' + (state.messages.length ? state.messages.map(renderChatMessage).join("") :
-        '<div class="chat-empty"><div class="empty-icon">◉</div><strong>Start a conversation with GLM</strong><p>Send a task. Relevant tools are selected automatically, or choose a test scenario to load its toolset.</p></div>') + '</div>' +
-      '<form id="chat-form" class="chat-composer"><div class="composer-row"><textarea class="textarea" id="chat-input" rows="2" placeholder="Send a message to the agent…" required></textarea><button class="btn primary" type="submit" id="chat-send">Send ↑</button></div><div class="hint" id="chat-hint">Free chat · toolset selected automatically from task intent</div></form></section>' +
+        '<div class="chat-empty"><div class="empty-icon">◉</div><strong>Start a conversation with Muse</strong><p>Send a task. Relevant tools are selected automatically, or choose a test scenario to load its toolset.</p></div>') + '</div>' +
+      '<form id="chat-form" class="chat-composer"><div class="composer-row"><textarea class="textarea" id="chat-input" rows="2" placeholder="Send a message to the Meta model…" required></textarea><button class="btn primary" type="submit" id="chat-send">Send ↑</button></div><div class="hint" id="chat-hint">Free chat · tools selected automatically from task intent</div></form></section>' +
       '<aside class="side-stack">' +
-      panel("Agent context","What the tested model receives",'<div class="info-row"><span>Model</span><strong>'+esc(state.model)+'</strong></div><div class="info-row"><span>Mode</span><strong id="context-mode">Free chat</strong></div><div class="info-row"><span>Tools</span><strong id="context-tools">Automatic</strong></div><div class="info-row"><span>Evaluator</span><strong>Hidden</strong></div>') +
-      panel("Live tool activity","Calls and results from this conversation",'<div id="chat-tool-events" class="event-stream">'+empty("No tool calls yet","Tool activity appears here as the agent works.")+'</div>') +
-      panel("Response metrics","Latest model response",'<div class="info-row"><span>Latency</span><strong id="chat-latency">—</strong></div><div class="info-row"><span>Prompt tokens</span><strong id="chat-prompt-tokens">—</strong></div><div class="info-row"><span>Completion tokens</span><strong id="chat-completion-tokens">—</strong></div><div class="info-row"><span>Total tokens</span><strong id="chat-total-tokens">—</strong></div>') +
+      panel("Agent context","What the tested model receives",'<div class="info-row"><span>Model</span><strong>' + esc(settings.model_name || settings.model || "—") + '</strong></div><div class="info-row"><span>Mode</span><strong id="context-mode">Free chat</strong></div><div class="info-row"><span>Reasoning effort</span><strong id="context-reasoning">' + esc(state.reasoningEffort || "Meta default") + '</strong></div><div class="info-row"><span>Tools</span><strong id="context-tools">Automatic</strong></div><div class="info-row"><span>Evaluator</span><strong>Hidden</strong></div>') +
+      panel("Live tool activity","Calls and results from this conversation",'<div id="chat-tool-events" class="event-stream">' + empty("No tool calls yet","Tool activity appears here as the agent works.") + '</div>') +
+      panel("Response metrics","Latest Meta response",'<div class="info-row"><span>Latency</span><strong id="chat-latency">—</strong></div><div class="info-row"><span>Input tokens</span><strong id="chat-prompt-tokens">—</strong></div><div class="info-row"><span>Output tokens</span><strong id="chat-completion-tokens">—</strong></div><div class="info-row"><span>Total tokens</span><strong id="chat-total-tokens">—</strong></div>') +
       '</aside></div>';
-    $("#chat-mode").value=state.chatMode;
-    $("#chat-test").disabled=state.chatMode!=="test";
+    $("#chat-mode").value = state.chatMode;
+    $("#chat-test").disabled = state.chatMode !== "test";
+    $("#chat-reasoning-effort").addEventListener("change",e=>{
+      state.reasoningEffort = e.target.value;
+      $("#context-reasoning").textContent = e.target.value==="auto" ? "Meta default" : e.target.value;
+    });
     $("#chat-mode").addEventListener("change",e=>{
-      state.chatMode=e.target.value;
-      $("#chat-test").disabled=state.chatMode!=="test";
-      $("#context-mode").textContent=state.chatMode==="test"?"Test-backed":"Free chat";
-      $("#chat-hint").textContent=state.chatMode==="test"?"The selected scenario supplies its normal toolset. Evaluation remains private.":"Free chat · toolset selected automatically from task intent";
+      state.chatMode = e.target.value;
+      $("#chat-test").disabled = state.chatMode !== "test";
+      $("#context-mode").textContent = state.chatMode==="test"?"Test-backed":"Free chat";
+      $("#chat-hint").textContent = state.chatMode==="test"?"The selected scenario supplies its toolset. Evaluation remains private.":"Free chat · tools selected automatically from task intent";
     });
     $("#chat-test").addEventListener("change",e=>{
-      const item=state.tests.find(x=>x.id===e.target.value);
-      state.selectedTest=item || null;
-      $("#context-tools").textContent=item?(item.tool_names||[]).join(", ")||"Automatic":"Automatic";
-      if(item && state.chatMode==="test") $("#chat-input").value=item.user_prompt || "";
+      const item = state.tests.find(x=>x.id===e.target.value);
+      state.selectedTest = item || null;
+      $("#context-tools").textContent = item?(item.tool_names||[]).join(", ")||"Automatic":"Automatic";
+      if(item && state.chatMode==="test") $("#chat-input").value = item.user_prompt || "";
     });
     $("#chat-form").addEventListener("submit",sendChat);
     scrollChat();
   }
   function renderChatMessage(message) {
     const role=message.role==="user"?"user":"assistant";
-    return '<div class="message '+role+'"><div class="message-label">'+(role==="user"?"You":"GLM")+'</div>'+esc(message.content||"")+'</div>';
+    return '<div class="message '+role+'"><div class="message-label">'+(role==="user"?"You":"Muse")+'</div>'+esc(message.content||"")+'</div>';
   }
   function scrollChat() {
     const node=$("#chat-messages"); if(node) node.scrollTop=node.scrollHeight;
@@ -679,7 +731,7 @@
     input.value="";
     state.messages.push({role:"user",content:text});
     appendChatNode(renderChatMessage({role:"user",content:text}));
-    const assistant=appendChatNode('<div class="message assistant"><div class="message-label">GLM</div><span class="streaming-text"></span><span class="typing-cursor"> ▍</span></div>');
+    const assistant=appendChatNode('<div class="message assistant"><div class="message-label">Muse</div><span class="streaming-text"></span><span class="typing-cursor"> ▍</span></div>');
     const toolPanel=$("#chat-tool-events");
     if(toolPanel) toolPanel.innerHTML="";
     $("#chat-send").disabled=true;
@@ -689,7 +741,7 @@
       await withStreamSlot(async () => {
         const response=await fetch(url("/ui/agent/chat"),{
           method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({message:text,test_id:testId,conversation_id:state.conversationId}),
+          body:JSON.stringify({message:text,test_id:testId,conversation_id:state.conversationId,reasoning_effort:$("#chat-reasoning-effort").value}),
           signal:controller.signal
         });
         if(!response.ok) {
@@ -720,8 +772,8 @@
               }
             } else if(event.type==="metrics") {
               const usage=event.usage||{};
-              $("#chat-prompt-tokens").textContent=usage.prompt_tokens||"—";
-              $("#chat-completion-tokens").textContent=usage.completion_tokens||"—";
+              $("#chat-prompt-tokens").textContent=usage.input_tokens||"—";
+              $("#chat-completion-tokens").textContent=usage.output_tokens||"—";
               $("#chat-total-tokens").textContent=usage.total_tokens||"—";
             } else if(event.type==="done") {
               doneEvent=event;
@@ -740,9 +792,10 @@
       state.messages.push({role:"assistant",content:fullText});
       if(doneEvent) {
         $("#chat-latency").textContent=formatDuration(doneEvent.latency_ms);
+        $("#context-reasoning").textContent=doneEvent.reasoning_effort || "Meta default";
         const usage=doneEvent.usage||{};
-        $("#chat-prompt-tokens").textContent=usage.prompt_tokens||"—";
-        $("#chat-completion-tokens").textContent=usage.completion_tokens||"—";
+        $("#chat-prompt-tokens").textContent=usage.input_tokens||"—";
+        $("#chat-completion-tokens").textContent=usage.output_tokens||"—";
         $("#chat-total-tokens").textContent=usage.total_tokens||"—";
         $("#context-tools").textContent=(doneEvent.tool_names||[]).join(", ")||"None selected";
       }
@@ -846,32 +899,123 @@
       ).join("")+'</div>':empty("No errors","No recent run errors."));
   }
   async function renderSettings() {
-    const content=$("#page-content");
-    let settings={};
-    try { settings=await api("/ui/settings");state.settings=settings; }
-    catch(error) { setConnected(false,"Unable to read backend settings"); }
-    content.innerHTML=heading("Settings","Connect the workspace to your Deplexo backend and inspect runtime configuration.")+
-      '<div class="grid two-col"><section class="panel"><div class="panel-header"><div><div class="panel-title">Backend connection</div><div class="panel-subtitle">The frontend calls only the /ui endpoint contract.</div></div></div>'+
-      '<form id="settings-form" class="form-grid"><div class="field full"><label for="api-base">Backend base URL</label><input class="input" id="api-base" placeholder="https://your-service.example.com" value="'+esc(state.apiBase)+'"><div class="hint">Enter the deployed Deplexo service URL, without /ui at the end. Saved in this browser only.</div></div>'+
-      '<div class="field full"><div class="heading-actions"><button class="btn primary" type="submit">Save connection</button><button class="btn" type="button" data-action="test-connection">Test connection</button></div></div></form>'+
-      '<div id="connection-result" class="hint" style="margin-top:12px"></div></section>'+
-      panel("Backend configuration","Read-only environment details",'<div class="info-row"><span>Model</span><strong>'+esc(settings.model||"—")+'</strong></div><div class="info-row"><span>Provider key</span><strong>'+ (settings.provider_configured?'<span class="badge pass">Configured</span>':'<span class="badge fail">Missing</span>')+'</strong></div><div class="info-row"><span>Cloudflare D1</span><strong>'+ (settings.d1_configured?'<span class="badge pass">Configured</span>':'<span class="badge">Memory fallback</span>')+'</strong></div><div class="info-row"><span>Max agent steps</span><strong>'+(Number(settings.max_agent_steps)===0?"Unlimited":esc(settings.max_agent_steps))+'</strong></div><div class="info-row"><span>Request timeout</span><strong>'+esc(settings.request_timeout_seconds||"—")+' s</strong></div>')+'</div>'+
-      panel("Runtime policy","Current safeguards",'<div class="info-row"><span>Worker model</span><strong>Single worker</strong></div><div class="info-row"><span>Test concurrency</span><strong>1 active test run</strong></div><div class="info-row"><span>Agent permissions</span><strong>Local tools only</strong></div><div class="info-row"><span>Evaluation visibility</span><strong>Hidden from tested agent</strong></div><div class="info-row"><span>Authentication</span><strong><span class="badge fail">Disabled</span></strong></div><p class="hint">The backend has no application authentication, as configured. Restrict public ingress before sharing this URL; any reachable caller can consume model quota.</p>');
+    const content = $("#page-content");
+    let settings = {};
+    try {
+      settings = await api("/ui/settings");
+      state.modelSettings = settings;
+      state.model = settings.model_name || settings.model || state.model;
+      state.reasoningEffort = settings.reasoning_effort || "auto";
+    } catch(error) {
+      setConnected(false,"Unable to read Meta settings");
+    }
+    const models = settings.models || [];
+    const selected = models.find(x=>x.id===settings.model) || models[0];
+    const modelOptions = models.map(item=>({
+      value:item.id,
+      label:item.name + " · $" + Number(item.input_per_million).toFixed(2) +
+        " in / $" + Number(item.output_per_million).toFixed(2) + " out per 1M" +
+        (item.contributor ? " · CONTRIBUTOR" : "")
+    }));
+    const efforts = reasoningOptions(settings);
+    const pricingRows = models.map(item =>
+      '<tr><td><strong>' + esc(item.name) + '</strong><div class="muted">' + esc(item.mode) +
+      (item.contributor ? ' · training data-use terms' : '') + '</div></td><td>$' +
+      Number(item.input_per_million).toFixed(3) + '</td><td>$' +
+      Number(item.cached_input_per_million).toFixed(3) + '</td><td>$' +
+      Number(item.output_per_million).toFixed(3) + '</td></tr>'
+    ).join("");
+    const contributorSelected = !!(selected && selected.contributor);
+    content.innerHTML = heading("Settings","Choose the Meta model used globally by the harness. All tests and conversations use this model.",
+      '<button class="btn" data-action="refresh">↻ Refresh</button>') +
+      '<div class="grid two-col"><section class="panel"><div class="panel-header"><div><div class="panel-title">Meta model selection</div><div class="panel-subtitle">One global model · changes apply to new requests.</div></div></div>' +
+      '<form id="model-settings-form" class="form-grid">' +
+      '<div class="field full"><label for="meta-model-select">Active Meta model</label><select class="select" id="meta-model-select">' +
+      modelOptions.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===settings.model?" selected":"") + '>' + esc(item.label) + '</option>').join("") +
+      '</select><div class="hint">Prices are USD per 1 million input/output tokens, before any cached-input or long-context adjustments.</div></div>' +
+      '<div class="field full"><label for="meta-reasoning-effort">Default reasoning effort</label><select class="select" id="meta-reasoning-effort">' +
+      efforts.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===(settings.reasoning_effort||"auto")?" selected":"") + '>' + esc(item.label) + '</option>').join("") +
+      '</select><div class="hint" id="meta-reasoning-hint">Auto leaves the reasoning setting out of the request so Meta applies this model’s own default (' + esc(settings.meta_default_reasoning_effort || "Meta default") + '). Higher effort can increase reasoning tokens, latency and cost.</div></div>' +
+      '<div class="field full" id="contributor-warning" style="' + (contributorSelected?"":"display:none;") + '"><div class="notice warning"><strong>Contributor data-use notice</strong><p>Meta may use prompts, files, code, context and model responses sent to Contributor models to train future models. Select Save only if you explicitly accept these terms.</p></div></div>' +
+      '<div class="field full"><div class="heading-actions"><button type="submit" class="btn primary">Save Meta configuration</button></div></div></form>' +
+      '<div class="info-row"><span>Provider</span><strong>Meta Model API · ' + (settings.provider_configured?'<span class="badge pass">Key configured</span>':'<span class="badge fail">MODEL_API_KEY missing</span>') + '</strong></div>' +
+      '<div class="info-row"><span>Base URL</span><strong>' + esc(settings.base_url || "https://api.meta.ai/v1") + '</strong></div>' +
+      '</section>' +
+      '<section class="panel"><div class="panel-header"><div><div class="panel-title">Backend connection</div><div class="panel-subtitle">The static frontend calls only the /ui endpoint contract.</div></div></div>' +
+      '<form id="settings-form" class="form-grid"><div class="field full"><label for="api-base">Backend base URL</label><input class="input" id="api-base" placeholder="https://your-service.example.com" value="' + esc(state.apiBase) + '"><div class="hint">Enter the Deplexo service URL without /ui. Saved in this browser only.</div></div>' +
+      '<div class="field full"><div class="heading-actions"><button class="btn primary" type="submit">Save connection</button><button class="btn" type="button" data-action="test-connection">Test connection</button></div></div></form>' +
+      '<div id="connection-result" class="hint" style="margin-top:12px"></div>' +
+      '<div class="divider"></div><div class="info-row"><span>Cloudflare D1</span><strong>' + (settings.d1_configured?'<span class="badge pass">Configured</span>':'<span class="badge">Memory fallback</span>') + '</strong></div>' +
+      '<div class="info-row"><span>Agent steps</span><strong>Unlimited</strong></div><div class="info-row"><span>Individual request timeout</span><strong>' + esc(settings.request_timeout_seconds || 90) + ' s</strong></div><div class="info-row"><span>Test-run timeout</span><strong>None</strong></div>' +
+      '</section></div>' +
+      panel("Meta published token prices","USD per 1M tokens · cached input shown separately",'<div class="table-wrap"><table><thead><tr><th>MODEL</th><th>INPUT</th><th>CACHED INPUT</th><th>OUTPUT</th></tr></thead><tbody>' + pricingRows + '</tbody></table></div>' +
+      '<p class="hint">Muse Ember 1.0: above 200K input tokens the published rate is $0.30 input / $0.012 cached input / $1.50 output per 1M. Prices can change; this table is the catalogue configured in this backend.</p>') +
+      panel("Reasoning power","Meta effort is a model request setting, not a harness difficulty level.",'<div class="activity-list">' +
+        '<div class="info-row"><span>Minimal / Low</span><strong>Lower reasoning-token use and latency</strong></div>' +
+        '<div class="info-row"><span>Medium</span><strong>Balanced reasoning budget</strong></div>' +
+        '<div class="info-row"><span>High / XHigh</span><strong>Deeper reasoning, typically higher cost and latency</strong></div>' +
+        '<div class="info-row"><span>Max</span><strong>Highest supported effort on eligible models only</strong></div>' +
+      '</div><p class="hint">The available values change with the selected model. Meta’s default is used when Auto is selected.</p>') +
+      panel("Runtime policy","Current safeguards",'<div class="info-row"><span>Workers</span><strong>1 Uvicorn worker</strong></div><div class="info-row"><span>Backend concurrency</span><strong>2 requests</strong></div><div class="info-row"><span>Concurrent test runs</span><strong>1</strong></div><div class="info-row"><span>Agent permissions</span><strong>Bounded local tools only</strong></div><div class="info-row"><span>Reasoning replay</span><strong>Stateless encrypted replay · store:false</strong></div><div class="info-row"><span>Authentication</span><strong><span class="badge fail">Disabled</span></strong></div><p class="hint">The backend has no application authentication. Restrict public ingress; any reachable caller may consume Meta API quota.</p>');
     $("#settings-form").addEventListener("submit",e=>{
       e.preventDefault();
-      state.apiBase=$("#api-base").value.trim().replace(/\/+$/,"");
+      state.apiBase = $("#api-base").value.trim().replace(/\/+$/,"");
       localStorage.setItem("model-lab-api",state.apiBase);
       toast("Backend URL saved in this browser.");
       testConnection();
+    });
+    const modelSelect = $("#meta-model-select");
+    const effortSelect = $("#meta-reasoning-effort");
+    const warning = $("#contributor-warning");
+    function syncModelControls() {
+      const model = models.find(item=>item.id===modelSelect.value);
+      if(!model) return;
+      const effortLabels = {
+        minimal:"Minimal — lowest effort", low:"Low — light reasoning",
+        medium:"Medium — balanced reasoning", high:"High — deeper reasoning",
+        xhigh:"XHigh — very deep reasoning", max:"Max — maximum supported"
+      };
+      const opts = [{value:"auto",label:"Meta default (" + model.default_reasoning_effort + ")"}]
+        .concat((model.reasoning_efforts || []).map(value=>({value,label:effortLabels[value] || value})));
+      const keep = Array.from(effortSelect.options).find(option=>option.value===effortSelect.value);
+      const wanted = keep && opts.some(item=>item.value===keep.value) ? keep.value : "auto";
+      effortSelect.innerHTML = opts.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===wanted?" selected":"") + '>' + esc(item.label) + '</option>').join("");
+      $("#meta-reasoning-hint").textContent = "Auto leaves reasoning out of the request so Meta applies this model’s default (" + model.default_reasoning_effort + "). Higher effort can increase reasoning tokens, latency and cost.";
+      warning.style.display = model.contributor ? "" : "none";
+      const warningBody = warning.querySelector("p");
+      if(warningBody) warningBody.textContent = model.contributor ?
+        "Meta may use prompts, files, code, context and model responses sent to Contributor models to train future models. Select Save only if you explicitly accept these terms." : "";
+    }
+    modelSelect.addEventListener("change",syncModelControls);
+    syncModelControls();
+    $("#model-settings-form").addEventListener("submit",async event=>{
+      event.preventDefault();
+      const model = models.find(item=>item.id===modelSelect.value);
+      if(!model){toast("Choose a supported Meta model.",true);return;}
+      if(model.contributor && !window.confirm("Contributor model data-use confirmation: Meta may use submitted prompts, code, files, context and responses to train future models. Do you explicitly accept this?")) return;
+      try {
+        const result = await api("/ui/settings",{method:"PUT",body:{
+          model:model.id,
+          reasoning_effort:effortSelect.value==="auto"?null:effortSelect.value,
+          confirm_contributor:!!model.contributor
+        }});
+        state.modelSettings = result;
+        state.model = result.model_name || result.model;
+        state.reasoningEffort = result.reasoning_effort || "auto";
+        $("#top-model").textContent = state.model;
+        setConnected(true,state.model);
+        toast("Meta model settings saved.");
+        await renderSettings();
+      } catch(error){toast(error.message,true);}
     });
   }
   async function testConnection() {
     const result=$("#connection-result");
     try {
       const data=await api("/ui/model/status");
-      state.model=data.model||state.model;
+      state.model=data.model_name||data.model||state.model;
       setConnected(true,state.model);
-      if(result) result.textContent="Connected to "+state.model+" · Streaming enabled";
+      if(result) result.textContent="Connected to Meta · "+state.model+" · Streaming enabled";
       toast("Backend connection successful.");
     } catch(error) {
       setConnected(false,"Check URL or service status");
@@ -899,7 +1043,7 @@
     else if(action==="new-test") openTestEditor();
     else if(action==="close-modal") closeModal();
     else if(action==="run-test") previewRun(id);
-    else if(action==="confirm-run") {closeModal();startRun(id);}
+    else if(action==="confirm-run") {const effort=$("#run-reasoning-effort")?$("#run-reasoning-effort").value:"auto";closeModal();startRun(id,effort);}
     else if(action==="inspect-test") inspectTest(id);
     else if(action==="edit-test") {
       api("/ui/tests/"+encodeURIComponent(id)).then(openTestEditor).catch(e=>toast(e.message,true));
