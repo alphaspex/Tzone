@@ -10,6 +10,7 @@ from . import evaluator, playground, test_library, ui_store
 _LIVE = {}
 _TASKS = {}
 _MAX_LIVE_EVENTS = 1200
+_MAX_LIVE_CACHE = 10
 _MAX_CONCURRENT_RUNS = 1
 
 def _now():
@@ -37,6 +38,13 @@ async def start_run(test_id):
     active = [task for task in _TASKS.values() if not task.done()]
     if len(active) >= _MAX_CONCURRENT_RUNS:
         raise RuntimeError("A test run is already active. This service runs one test at a time.")
+    while len(_TASKS) >= _MAX_LIVE_CACHE:
+        oldest_id = next(iter(_TASKS))
+        oldest_task = _TASKS[oldest_id]
+        if not oldest_task.done():
+            break
+        _TASKS.pop(oldest_id, None)
+        _LIVE.pop(oldest_id, None)
     run_id = "run_" + uuid.uuid4().hex[:16]
     created_at = _now()
     run = {
@@ -144,7 +152,7 @@ async def cancel_run(run_id):
             await task
         except asyncio.CancelledError:
             pass
-    else:
+    elif run.get("status") in ("queued","running"):
         await ui_store.update_run(run_id,{"status":"cancelled","completed_at":_now(),"error":"Cancelled by user"})
     return await ui_store.get_run(run_id)
 
