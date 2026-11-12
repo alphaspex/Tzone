@@ -173,8 +173,16 @@ async def cancel_run(run_id):
             await task
         except asyncio.CancelledError:
             pass
-    elif run.get("status") in ("queued","running"):
+    run = await ui_store.get_run(run_id)
+    # A task cancelled before its coroutine first runs cannot execute its own cleanup.
+    if run and run.get("status") in ("queued","running"):
         await ui_store.update_run(run_id,{"status":"cancelled","completed_at":_now(),"error":"Cancelled by user"})
+        await _publish(run_id,{"type":"cancelled","status":"cancelled","message":"Cancelled by user"})
+        state = _LIVE.get(run_id)
+        if state:
+            state["done"] = True
+            async with state["condition"]:
+                state["condition"].notify_all()
     return await ui_store.get_run(run_id)
 
 async def stream_events(run_id):
