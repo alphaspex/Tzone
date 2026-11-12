@@ -60,7 +60,7 @@ async def start_run(test_id):
     _TASKS[run_id] = asyncio.create_task(_execute(run_id,case))
     return run
 
-async def _execute(run_id, case):
+async def _execute_inner(run_id, case):
     started = time.monotonic()
     await ui_store.update_run(run_id,{"status":"running","started_at":_now()})
     await _publish(run_id,{"type":"status","status":"running","message":"Starting test"})
@@ -124,18 +124,35 @@ async def _execute(run_id, case):
         })
         await _publish(run_id,{"type":"done","status":final_status,"passed":passed,
                                "result":result,"latency_ms":round(total_latency,2)})
-    except asyncio.CancelledError:
-        await ui_store.update_run(run_id,{"status":"cancelled","completed_at":_now(),"error":"Cancelled by user"})
-        await _publish(run_id,{"type":"cancelled","status":"cancelled","message":"Run cancelled"})
-        raise
     except Exception as exc:
         error = str(exc)[:1200]
         error_trace = traceback.format_exc()[-6000:]
         await ui_store.update_run(run_id,{"status":"failed","completed_at":_now(),"error":error})
         await _publish(run_id,{"type":"error","status":"failed","message":error,"traceback":error_trace})
         await _publish(run_id,{"type":"done","status":"failed","passed":False,"error":error})
+
+
+async def _execute(run_id, case):
+    """Enforce each test's own timeout; cancellation and timeout are distinct outcomes."""
+    timeout_seconds = max(5, min(int(case.get("timeout_seconds", 90)), 300))
+    state = _LIVE.get(run_id)
+    try:
+        await asyncio.wait_for(_execute_inner(run_id, case), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        message = f"Test exceeded its {timeout_seconds}-second timeout."
+        await ui_store.update_run(run_id,{"status":"failed","passed":False,
+            "completed_at":_now(),"error":message})
+        await _publish(run_id,{"type":"error","status":"failed","message":message})
+        await _publish(run_id,{"type":"done","status":"failed","passed":False,"error":message})
+    except asyncio.CancelledError:
+        message = "Cancelled by user"
+        run = await ui_store.get_run(run_id)
+        if run and run.get("status") in ("queued","running"):
+            await ui_store.update_run(run_id,{"status":"cancelled",
+                "completed_at":_now(),"error":message})
+            await _publish(run_id,{"type":"cancelled","status":"cancelled","message":message})
+        raise
     finally:
-        state = _LIVE.get(run_id)
         if state:
             state["done"] = True
             async with state["condition"]:
