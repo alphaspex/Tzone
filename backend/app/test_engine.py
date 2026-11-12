@@ -2,6 +2,7 @@
 import asyncio
 import time
 import uuid
+import traceback
 from collections import deque
 from datetime import datetime, timezone
 from . import evaluator, playground, test_library, ui_store
@@ -58,6 +59,7 @@ async def _execute(run_id, case):
     tool_events, responses, usage = [], [], {}
     final_latency = 0.0
     error = None
+    error_trace = None
     try:
         messages = case.get("messages") or [{"role":"user","content":case.get("user_prompt","")}]
         for index, message in enumerate(messages):
@@ -82,7 +84,8 @@ async def _execute(run_id, case):
                                            "latency_ms":event.get("latency_ms",0)})
                 elif event.get("type") == "error":
                     error = event.get("message","Model error")
-                    await _publish(run_id,{"type":"error","message":error})
+                    error_trace = event.get("traceback","")
+                    await _publish(run_id,{"type":"error","message":error,"traceback":error_trace})
                 else:
                     await _publish(run_id,event)
             if error:
@@ -102,7 +105,7 @@ async def _execute(run_id, case):
             "full_response":final_response,"turn_responses":responses,
             "expected_output":case.get("expected_output"),
             "assertion_results":deterministic,"model_evaluation":judge,
-            "tool_events":tool_events,"errors":[error] if error else [],
+            "tool_events":tool_events,"errors":[{"message":error,"stack_trace":error_trace}] if error else [],
             "usage":usage,"latency_ms":round(total_latency,2),
             "model_latency_ms":round(final_latency,2),
         }
@@ -119,8 +122,9 @@ async def _execute(run_id, case):
         raise
     except Exception as exc:
         error = str(exc)[:1200]
+        error_trace = traceback.format_exc()[-6000:]
         await ui_store.update_run(run_id,{"status":"failed","completed_at":_now(),"error":error})
-        await _publish(run_id,{"type":"error","status":"failed","message":error})
+        await _publish(run_id,{"type":"error","status":"failed","message":error,"traceback":error_trace})
         await _publish(run_id,{"type":"done","status":"failed","passed":False,"error":error})
     finally:
         state = _LIVE.get(run_id)
