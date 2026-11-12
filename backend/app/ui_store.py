@@ -14,7 +14,11 @@ _MAX_MEMORY_CONVERSATIONS = 32
 _MAX_CUSTOM = 200
 
 def _cache_run(item):
-    _cache_run(item)
+    _RUNS[item["id"]] = item
+    while len(_RUNS) > _MAX_MEMORY_RUNS:
+        oldest_id = next(iter(_RUNS))
+        _RUNS.pop(oldest_id, None)
+        _EVENTS.pop(oldest_id, None)
 
 def _cache_custom(item):
     _CUSTOM[item["id"]] = item
