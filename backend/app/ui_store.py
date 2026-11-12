@@ -9,6 +9,10 @@ _EVENTS = {}
 _MESSAGES = {}
 _METRICS = deque(maxlen=2000)
 _TOOL_EVENTS = deque(maxlen=1000)
+_AGENT_STATES = {}
+_HARNESS_SETTINGS = {}
+_MAX_AGENT_STATES = 32
+_MAX_AGENT_STATE_CHARS = 4_000_000
 _MAX_MEMORY_RUNS = 30
 _MAX_MEMORY_CONVERSATIONS = 32
 _MAX_CUSTOM = 200
@@ -58,6 +62,84 @@ async def start_ui_store():
     if store.configured():
         for sql in statements:
             await store.execute(sql)
+    await reset_meta_workspace_once()
+
+async def reset_meta_workspace_once():
+    """Clear pre-Meta workspace data once; future deploys preserve newly created records."""
+    _CUSTOM.clear()
+    _RUNS.clear()
+    _EVENTS.clear()
+    _MESSAGES.clear()
+    _METRICS.clear()
+    _TOOL_EVENTS.clear()
+    _AGENT_STATES.clear()
+    _HARNESS_SETTINGS.clear()
+    if not store.configured():
+        return {"applied": False, "persistence": "memory"}
+    marker = "meta_model_api_workspace_reset_v1"
+    rows = await _rows("SELECT migration_id FROM workspace_migrations WHERE migration_id = ? LIMIT 1", [marker])
+    if rows:
+        return {"applied": False, "persistence": "d1"}
+    for table in ("run_events", "custom_tests", "test_runs", "messages", "sessions", "tool_events", "metrics", "agent_states", "harness_settings"):
+        await store.execute(f"DELETE FROM {table}")
+    await store.execute("INSERT INTO workspace_migrations (migration_id) VALUES (?)", [marker])
+    return {"applied": True, "persistence": "d1"}
+
+async def get_harness_settings():
+    if _HARNESS_SETTINGS:
+        return dict(_HARNESS_SETTINGS)
+    if not store.configured():
+        return {}
+    rows = await _rows("SELECT value_json FROM harness_settings WHERE setting_key = ? LIMIT 1", ["model"])
+    if not rows:
+        return {}
+    try:
+        value = _json(rows[0].get("value_json"), {})
+        if isinstance(value, dict):
+            _HARNESS_SETTINGS.update(value)
+    except Exception:
+        return {}
+    return dict(_HARNESS_SETTINGS)
+
+async def save_harness_settings(value):
+    item = dict(value or {})
+    _HARNESS_SETTINGS.clear()
+    _HARNESS_SETTINGS.update(item)
+    if store.configured():
+        await store.execute(
+            "INSERT INTO harness_settings (setting_key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_at = CURRENT_TIMESTAMP",
+            ["model", json.dumps(item, ensure_ascii=False)])
+    return dict(_HARNESS_SETTINGS)
+
+async def get_agent_state(session_id):
+    if session_id in _AGENT_STATES:
+        return list(_AGENT_STATES[session_id])
+    if not store.configured():
+        return []
+    rows = await _rows("SELECT state_json FROM agent_states WHERE session_id = ? LIMIT 1", [session_id])
+    if not rows:
+        return []
+    state = _json(rows[0].get("state_json"), [])
+    if not isinstance(state, list):
+        return []
+    _AGENT_STATES[session_id] = state
+    while len(_AGENT_STATES) > _MAX_AGENT_STATES:
+        _AGENT_STATES.pop(next(iter(_AGENT_STATES)), None)
+    return list(state)
+
+async def save_agent_state(session_id, items):
+    state = list(items or [])
+    encoded = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+    if len(encoded) > _MAX_AGENT_STATE_CHARS:
+        raise ValueError("Conversation state exceeded the 4 MB replay limit. Start a new conversation or remove older context.")
+    _AGENT_STATES[session_id] = state
+    while len(_AGENT_STATES) > _MAX_AGENT_STATES:
+        _AGENT_STATES.pop(next(iter(_AGENT_STATES)), None)
+    if store.configured():
+        await store.execute(
+            "INSERT INTO agent_states (session_id, state_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json, updated_at = CURRENT_TIMESTAMP",
+            [session_id, encoded])
+    return len(state)
 
 async def save_custom_test(test):
     item = dict(test)
