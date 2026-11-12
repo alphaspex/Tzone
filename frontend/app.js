@@ -520,6 +520,7 @@
       (["running","queued"].includes(run.status) ? '<button class="btn danger small" data-action="cancel-run" data-id="' + esc(run.id) + '">■ Cancel</button>' : '') +
       '<button class="btn small" data-action="export-run" data-id="' + esc(run.id) + '" data-format="json">JSON</button>' +
       '<button class="btn small" data-action="export-run" data-id="' + esc(run.id) + '" data-format="markdown">Markdown</button></div></div>' +
+      '<div class="info-row"><span>Meta model</span><strong>' + esc(run.model || result.model || "—") + '</strong></div><div class="info-row"><span>Reasoning effort</span><strong>' + esc(run.reasoning_effort || result.reasoning_effort || "Meta default") + '</strong></div>' +
       '<div class="grid stats-grid">' +
       statCard("Latency",formatDuration(run.latency_ms),"End-to-end","◷") +
       statCard("Assertions",assertion.total == null ? "—" : (assertion.passed_count || 0) + "/" + assertion.total,"Deterministic checks","✓") +
@@ -731,7 +732,7 @@
       await withStreamSlot(async () => {
         const response=await fetch(url("/ui/agent/chat"),{
           method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({message:text,test_id:testId,conversation_id:state.conversationId}),
+          body:JSON.stringify({message:text,test_id:testId,conversation_id:state.conversationId,reasoning_effort:$("#chat-reasoning-effort").value}),
           signal:controller.signal
         });
         if(!response.ok) {
@@ -782,9 +783,10 @@
       state.messages.push({role:"assistant",content:fullText});
       if(doneEvent) {
         $("#chat-latency").textContent=formatDuration(doneEvent.latency_ms);
+        $("#context-reasoning").textContent=doneEvent.reasoning_effort || "Meta default";
         const usage=doneEvent.usage||{};
-        $("#chat-prompt-tokens").textContent=usage.prompt_tokens||"—";
-        $("#chat-completion-tokens").textContent=usage.completion_tokens||"—";
+        $("#chat-prompt-tokens").textContent=usage.input_tokens||"—";
+        $("#chat-completion-tokens").textContent=usage.output_tokens||"—";
         $("#chat-total-tokens").textContent=usage.total_tokens||"—";
         $("#context-tools").textContent=(doneEvent.tool_names||[]).join(", ")||"None selected";
       }
@@ -997,9 +999,9 @@
     const result=$("#connection-result");
     try {
       const data=await api("/ui/model/status");
-      state.model=data.model||state.model;
+      state.model=data.model_name||data.model||state.model;
       setConnected(true,state.model);
-      if(result) result.textContent="Connected to "+state.model+" · Streaming enabled";
+      if(result) result.textContent="Connected to Meta · "+state.model+" · Streaming enabled";
       toast("Backend connection successful.");
     } catch(error) {
       setConnected(false,"Check URL or service status");
