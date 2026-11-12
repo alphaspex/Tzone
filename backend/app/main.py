@@ -18,7 +18,7 @@ async def lifespan(app):
     await provider.close_provider()
 
 app = FastAPI(title="GLM Model Test Harness", version="0.2.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET","POST","PUT","DELETE","OPTIONS"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET","POST","PUT","DELETE","OPTIONS"], allow_headers=["*"], expose_headers=["X-Conversation-ID","X-Session-ID"])
 app.include_router(ui_api.router)
 
 @app.get("/")
