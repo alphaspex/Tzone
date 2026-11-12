@@ -55,6 +55,9 @@ async def start_ui_store():
     statements = [
         "CREATE TABLE IF NOT EXISTS custom_tests (id TEXT PRIMARY KEY, category TEXT NOT NULL, difficulty TEXT, definition_json TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS run_events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, event_type TEXT NOT NULL, event_json TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS agent_states (session_id TEXT PRIMARY KEY, state_json TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS harness_settings (setting_key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS workspace_migrations (migration_id TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)",
         "CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id)",
         "CREATE INDEX IF NOT EXISTS idx_test_runs_created ON test_runs(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)",
