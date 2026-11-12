@@ -5,7 +5,7 @@ import resource
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response, PlainTextResponse
 from . import playground, test_engine, test_library, tools, ui_store, store
 from .config import settings
 
@@ -205,8 +205,18 @@ async def start_test_run(body: dict):
     return {"run":_run_summary(run),"stream_url":f"/ui/runs/{run['id']}/stream"}
 
 @router.get("/runs")
-async def list_test_runs(limit: int = 100):
+async def list_test_runs(limit: int = 100, status: str | None = None,
+                         category: str | None = None, test_id: str | None = None,
+                         passed: bool | None = None):
     runs = await ui_store.list_runs(limit)
+    if status:
+        runs = [r for r in runs if r.get("status") == status]
+    if category:
+        runs = [r for r in runs if r.get("category") == category]
+    if test_id:
+        runs = [r for r in runs if r.get("test_id") == test_id]
+    if passed is not None:
+        runs = [r for r in runs if r.get("passed") is passed]
     return {"runs":[_run_summary(run) for run in runs]}
 
 @router.post("/runs/compare")
@@ -234,6 +244,49 @@ async def get_test_run(run_id: str):
     if not run:
         raise HTTPException(404,"run not found")
     return {"run":run}
+
+@router.get("/runs/{run_id}/export")
+async def export_test_run(run_id: str, format: str = "json"):
+    run = await ui_store.get_run(run_id)
+    if not run:
+        raise HTTPException(404,"run not found")
+    export_format = format.lower()
+    if export_format == "json":
+        payload = json.dumps(run,ensure_ascii=False,indent=2)
+        return Response(payload,media_type="application/json",
+                        headers={"Content-Disposition":f'attachment; filename="{run_id}.json"'})
+    if export_format == "markdown":
+        result = run.get("result") or {}
+        assertion = result.get("assertion_results") or {}
+        fence = chr(96) * 3
+        lines = [
+            f"# {run.get('test_name','Test run')}",
+            "",
+            f"- Run: {run_id}",
+            f"- Status: {run.get('status')}",
+            f"- Passed: {run.get('passed')}",
+            f"- Latency: {run.get('latency_ms')} ms",
+            "",
+            "## Prompt",
+            fence + "text",
+            json.dumps(result.get("full_prompt",[]),ensure_ascii=False,indent=2),
+            fence,
+            "",
+            "## Response",
+            fence + "text",
+            result.get("full_response",""),
+            fence,
+            "",
+            "## Assertions",
+        ]
+        for item in assertion.get("assertions",[]):
+            lines.append(f"- [{'x' if item.get('passed') else ' '}] {item.get('type')}: {item.get('detail')}")
+        lines.extend(["","## Model evaluation",json.dumps(result.get("model_evaluation"),ensure_ascii=False,indent=2),
+                      "","## Tool events",json.dumps(result.get("tool_events",[]),ensure_ascii=False,indent=2),
+                      "","## Errors",json.dumps(result.get("errors",[]),ensure_ascii=False,indent=2)])
+        return PlainTextResponse("\n".join(lines),media_type="text/markdown",
+                                 headers={"Content-Disposition":f'attachment; filename="{run_id}.md"'})
+    raise HTTPException(422,"format must be json or markdown")
 
 @router.post("/runs/{run_id}/cancel")
 async def cancel_test_run(run_id: str):
