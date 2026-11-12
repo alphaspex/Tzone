@@ -149,7 +149,7 @@ _SCENARIOS = {
         ),
         _scenario(
             "Validate untrusted JSON before use",
-            "Use validate_json on this exact text: {"job":"J-44","attempts":3,"enabled":true,"targets":["eu","us"]}. Report whether parsing succeeded and list the types of all four fields. Do not modify the input.",
+            'Use validate_json on this exact text: {"job":"J-44","attempts":3,"enabled":true,"targets":["eu","us"]}. Report whether parsing succeeded and list the types of all four fields. Do not modify the input.',
             "Valid JSON; job string, attempts integer, enabled boolean, targets array.",
             [{"type": "tool_called", "name": "validate_json"}, {"type": "contains", "value": "valid"}],
             ["validate_json"],
