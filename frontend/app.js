@@ -644,47 +644,56 @@
   }
 
   async function renderAgent() {
-    const content=$("#page-content");
-    let testOptions=[];
+    const content = $("#page-content");
+    let testOptions = [];
+    let settings = {};
     try {
-      if (!state.tests.length) await loadTestCatalog();
-      testOptions=state.tests;
+      await Promise.all([state.tests.length?Promise.resolve():loadTestCatalog(),loadModelSettings()]);
+      testOptions = state.tests;
+      settings = state.modelSettings || {};
     } catch (_) {}
-    const selected=state.selectedTest;
-    content.innerHTML=heading("Harness Agent","Chat directly with the same GLM agent. Watch its tokens and tool calls as they happen.",
+    const selected = state.selectedTest;
+    const efforts = reasoningOptions(settings);
+    content.innerHTML = heading("Harness Agent","Chat directly with the globally selected Meta model. Watch streamed output and local tool calls.",
       '<button class="btn" data-action="new-chat">＋ New conversation</button>') +
       '<div class="split-layout">' +
-      '<section class="panel chat-panel"><div class="panel-header"><div><div class="panel-title">Agent playground</div><div class="panel-subtitle">Live streaming · automatic tool selection · conversation history</div></div><span class="badge pass">Autonomous</span></div>' +
+      '<section class="panel chat-panel"><div class="panel-header"><div><div class="panel-title">Agent playground</div><div class="panel-subtitle">Meta Responses API · live streaming · automatic tool selection · conversation history</div></div><span class="badge pass">Autonomous</span></div>' +
       '<div class="toolbar"><select class="select" id="chat-mode"><option value="free">Free chat · auto tools</option><option value="test">Test-backed chat · selected tools</option></select>' +
-      '<select class="select" id="chat-test"><option value="">Choose a test…</option>' + testOptions.map(x=>'<option value="'+esc(x.id)+'" '+(selected&&selected.id===x.id?"selected":"")+'>'+esc(x.name)+'</option>').join("")+'</select></div>' +
+      '<select class="select" id="chat-test"><option value="">Choose a test…</option>' + testOptions.map(x=>'<option value="' + esc(x.id) + '" ' + (selected&&selected.id===x.id?"selected":"") + '>' + esc(x.name) + '</option>').join("") + '</select>' +
+      '<select class="select" id="chat-reasoning-effort">' + efforts.map(x=>'<option value="' + esc(x.value) + '"' + (x.value===(state.reasoningEffort||"auto")?" selected":"") + '>' + esc(x.label) + '</option>').join("") + '</select></div>' +
+      '<div class="hint">Global model: ' + esc(settings.model_name || settings.model || "Loading") + '. Reasoning effort can be overridden for this conversation.</div>' +
       '<div id="chat-messages" class="chat-messages">' + (state.messages.length ? state.messages.map(renderChatMessage).join("") :
-        '<div class="chat-empty"><div class="empty-icon">◉</div><strong>Start a conversation with GLM</strong><p>Send a task. Relevant tools are selected automatically, or choose a test scenario to load its toolset.</p></div>') + '</div>' +
-      '<form id="chat-form" class="chat-composer"><div class="composer-row"><textarea class="textarea" id="chat-input" rows="2" placeholder="Send a message to the agent…" required></textarea><button class="btn primary" type="submit" id="chat-send">Send ↑</button></div><div class="hint" id="chat-hint">Free chat · toolset selected automatically from task intent</div></form></section>' +
+        '<div class="chat-empty"><div class="empty-icon">◉</div><strong>Start a conversation with Muse</strong><p>Send a task. Relevant tools are selected automatically, or choose a test scenario to load its toolset.</p></div>') + '</div>' +
+      '<form id="chat-form" class="chat-composer"><div class="composer-row"><textarea class="textarea" id="chat-input" rows="2" placeholder="Send a message to the Meta model…" required></textarea><button class="btn primary" type="submit" id="chat-send">Send ↑</button></div><div class="hint" id="chat-hint">Free chat · tools selected automatically from task intent</div></form></section>' +
       '<aside class="side-stack">' +
-      panel("Agent context","What the tested model receives",'<div class="info-row"><span>Model</span><strong>'+esc(state.model)+'</strong></div><div class="info-row"><span>Mode</span><strong id="context-mode">Free chat</strong></div><div class="info-row"><span>Tools</span><strong id="context-tools">Automatic</strong></div><div class="info-row"><span>Evaluator</span><strong>Hidden</strong></div>') +
-      panel("Live tool activity","Calls and results from this conversation",'<div id="chat-tool-events" class="event-stream">'+empty("No tool calls yet","Tool activity appears here as the agent works.")+'</div>') +
-      panel("Response metrics","Latest model response",'<div class="info-row"><span>Latency</span><strong id="chat-latency">—</strong></div><div class="info-row"><span>Prompt tokens</span><strong id="chat-prompt-tokens">—</strong></div><div class="info-row"><span>Completion tokens</span><strong id="chat-completion-tokens">—</strong></div><div class="info-row"><span>Total tokens</span><strong id="chat-total-tokens">—</strong></div>') +
+      panel("Agent context","What the tested model receives",'<div class="info-row"><span>Model</span><strong>' + esc(settings.model_name || settings.model || "—") + '</strong></div><div class="info-row"><span>Mode</span><strong id="context-mode">Free chat</strong></div><div class="info-row"><span>Reasoning effort</span><strong id="context-reasoning">' + esc(state.reasoningEffort || "Meta default") + '</strong></div><div class="info-row"><span>Tools</span><strong id="context-tools">Automatic</strong></div><div class="info-row"><span>Evaluator</span><strong>Hidden</strong></div>') +
+      panel("Live tool activity","Calls and results from this conversation",'<div id="chat-tool-events" class="event-stream">' + empty("No tool calls yet","Tool activity appears here as the agent works.") + '</div>') +
+      panel("Response metrics","Latest Meta response",'<div class="info-row"><span>Latency</span><strong id="chat-latency">—</strong></div><div class="info-row"><span>Input tokens</span><strong id="chat-prompt-tokens">—</strong></div><div class="info-row"><span>Output tokens</span><strong id="chat-completion-tokens">—</strong></div><div class="info-row"><span>Total tokens</span><strong id="chat-total-tokens">—</strong></div>') +
       '</aside></div>';
-    $("#chat-mode").value=state.chatMode;
-    $("#chat-test").disabled=state.chatMode!=="test";
+    $("#chat-mode").value = state.chatMode;
+    $("#chat-test").disabled = state.chatMode !== "test";
+    $("#chat-reasoning-effort").addEventListener("change",e=>{
+      state.reasoningEffort = e.target.value;
+      $("#context-reasoning").textContent = e.target.value==="auto" ? "Meta default" : e.target.value;
+    });
     $("#chat-mode").addEventListener("change",e=>{
-      state.chatMode=e.target.value;
-      $("#chat-test").disabled=state.chatMode!=="test";
-      $("#context-mode").textContent=state.chatMode==="test"?"Test-backed":"Free chat";
-      $("#chat-hint").textContent=state.chatMode==="test"?"The selected scenario supplies its normal toolset. Evaluation remains private.":"Free chat · toolset selected automatically from task intent";
+      state.chatMode = e.target.value;
+      $("#chat-test").disabled = state.chatMode !== "test";
+      $("#context-mode").textContent = state.chatMode==="test"?"Test-backed":"Free chat";
+      $("#chat-hint").textContent = state.chatMode==="test"?"The selected scenario supplies its toolset. Evaluation remains private.":"Free chat · tools selected automatically from task intent";
     });
     $("#chat-test").addEventListener("change",e=>{
-      const item=state.tests.find(x=>x.id===e.target.value);
-      state.selectedTest=item || null;
-      $("#context-tools").textContent=item?(item.tool_names||[]).join(", ")||"Automatic":"Automatic";
-      if(item && state.chatMode==="test") $("#chat-input").value=item.user_prompt || "";
+      const item = state.tests.find(x=>x.id===e.target.value);
+      state.selectedTest = item || null;
+      $("#context-tools").textContent = item?(item.tool_names||[]).join(", ")||"Automatic":"Automatic";
+      if(item && state.chatMode==="test") $("#chat-input").value = item.user_prompt || "";
     });
     $("#chat-form").addEventListener("submit",sendChat);
     scrollChat();
   }
   function renderChatMessage(message) {
     const role=message.role==="user"?"user":"assistant";
-    return '<div class="message '+role+'"><div class="message-label">'+(role==="user"?"You":"GLM")+'</div>'+esc(message.content||"")+'</div>';
+    return '<div class="message '+role+'"><div class="message-label">'+(role==="user"?"You":"Muse")+'</div>'+esc(message.content||"")+'</div>';
   }
   function scrollChat() {
     const node=$("#chat-messages"); if(node) node.scrollTop=node.scrollHeight;
@@ -712,7 +721,7 @@
     input.value="";
     state.messages.push({role:"user",content:text});
     appendChatNode(renderChatMessage({role:"user",content:text}));
-    const assistant=appendChatNode('<div class="message assistant"><div class="message-label">GLM</div><span class="streaming-text"></span><span class="typing-cursor"> ▍</span></div>');
+    const assistant=appendChatNode('<div class="message assistant"><div class="message-label">Muse</div><span class="streaming-text"></span><span class="typing-cursor"> ▍</span></div>');
     const toolPanel=$("#chat-tool-events");
     if(toolPanel) toolPanel.innerHTML="";
     $("#chat-send").disabled=true;
@@ -753,8 +762,8 @@
               }
             } else if(event.type==="metrics") {
               const usage=event.usage||{};
-              $("#chat-prompt-tokens").textContent=usage.prompt_tokens||"—";
-              $("#chat-completion-tokens").textContent=usage.completion_tokens||"—";
+              $("#chat-prompt-tokens").textContent=usage.input_tokens||"—";
+              $("#chat-completion-tokens").textContent=usage.output_tokens||"—";
               $("#chat-total-tokens").textContent=usage.total_tokens||"—";
             } else if(event.type==="done") {
               doneEvent=event;
