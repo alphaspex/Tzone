@@ -382,6 +382,28 @@
     } catch (error) { toast(error.message,true); }
   }
 
+  async function previewRun(id) {
+    try {
+      const test=await api("/ui/tests/"+encodeURIComponent(id));
+      state.pendingRunTest=test;
+      const summary={
+        name:test.name,category:test.category,difficulty:test.difficulty,
+        description:test.description,user_prompt:test.user_prompt,
+        tools:test.tool_names,parameters:test.parameters,
+        timeout_seconds:test.timeout_seconds || 90,
+        expected_output:test.expected_output,
+        assertions:test.assertions,
+        judge_rubric:test.judge_rubric
+      };
+      $("#modal-root").innerHTML='<div class="modal-backdrop"><div class="modal"><div class="modal-header"><div><div class="eyebrow">EXECUTION PREVIEW</div><h2>'+esc(test.name)+'</h2></div><button class="btn small" data-action="close-modal">✕</button></div>'+
+        '<div class="code-note">Review the exact task setup. Expected output and evaluation rules remain outside the tested model context.</div>'+
+        '<div class="grid two-col" style="margin-top:12px"><div><div class="panel-title">Agent receives</div><pre class="result-block">'+esc(pretty({system_prompt:test.system_prompt,user_prompt:test.user_prompt,tools:test.tool_names,parameters:test.parameters}))+'</pre></div>'+
+        '<div><div class="panel-title">Evaluator keeps private</div><pre class="result-block">'+esc(pretty({expected_output:test.expected_output,assertions:test.assertions,judge_rubric:test.judge_rubric}))+'</pre></div></div>'+
+        '<div class="info-row"><span>Timeout</span><strong>'+esc(test.timeout_seconds || 90)+' seconds</strong></div>'+
+        '<div class="heading-actions" style="margin-top:15px"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="confirm-run" data-id="'+esc(id)+'">Confirm and run →</button></div></div></div>';
+    } catch(error){toast(error.message,true);}
+  }
+
   async function startRun(id) {
     try {
       if (state.activeStream) state.activeStream.abort();
@@ -864,7 +886,8 @@
     if(action==="refresh") refreshCurrent();
     else if(action==="new-test") openTestEditor();
     else if(action==="close-modal") closeModal();
-    else if(action==="run-test") {closeModal();startRun(id);}
+    else if(action==="run-test") previewRun(id);
+    else if(action==="confirm-run") {closeModal();startRun(id);}
     else if(action==="inspect-test") inspectTest(id);
     else if(action==="edit-test") {
       api("/ui/tests/"+encodeURIComponent(id)).then(openTestEditor).catch(e=>toast(e.message,true));
