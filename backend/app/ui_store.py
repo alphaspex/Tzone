@@ -9,7 +9,8 @@ _EVENTS = {}
 _MESSAGES = {}
 _METRICS = deque(maxlen=5000)
 _TOOL_EVENTS = deque(maxlen=2000)
-_MAX_MEMORY_RUNS = 200
+_MAX_MEMORY_RUNS = 50
+_MAX_MEMORY_CONVERSATIONS = 64
 _MAX_CUSTOM = 500
 
 def _json(value, default=None):
@@ -154,6 +155,8 @@ async def list_run_events(run_id):
     return [_json(row.get("event_json"), {}) for row in rows]
 
 async def save_chat_message(session_id, role, content):
+    if session_id not in _MESSAGES and len(_MESSAGES) >= _MAX_MEMORY_CONVERSATIONS:
+        _MESSAGES.pop(next(iter(_MESSAGES)), None)
     _MESSAGES.setdefault(session_id, []).append({"role":role,"content":content})
     if len(_MESSAGES[session_id]) > 200:
         _MESSAGES[session_id] = _MESSAGES[session_id][-200:]
