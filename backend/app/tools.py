@@ -28,6 +28,24 @@ def definitions(names=None):
     wanted = set(names)
     return [item for item in _TOOL_DEFS if item["function"]["name"] in wanted]
 
+def responses_definitions(names=None):
+    """Convert the local registry to Meta Responses API function-tool objects."""
+    wanted = set(names) if names is not None else None
+    result = []
+    for item in _TOOL_DEFS:
+        function = item["function"]
+        if wanted is not None and function["name"] not in wanted:
+            continue
+        result.append({
+            "type": "function",
+            "name": function["name"],
+            "description": function.get("description", ""),
+            "parameters": function.get("parameters", {"type": "object", "properties": {}}),
+            "strict": False,
+        })
+    return result
+
+
 def select_for_task(text):
     """Select ordinary tools from task intent. No evaluation metadata is consulted."""
     value = (text or "").lower()
