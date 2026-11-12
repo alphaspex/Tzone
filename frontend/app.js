@@ -431,7 +431,9 @@
       const settings = await loadModelSettings();
       state.pendingRunTest = test;
       const options = reasoningOptions(settings);
-      const selectedEffort = (test.parameters || {}).reasoning_effort || "auto";
+      const availableEfforts = settings.reasoning_efforts || [];
+      const storedEffort = (test.parameters || {}).reasoning_effort || "auto";
+      const selectedEffort = storedEffort==="auto" || availableEfforts.includes(storedEffort) ? storedEffort : "auto";
       const summary = {
         name:test.name,category:test.category,difficulty:difficultyLabel(test),
         description:test.description,user_prompt:test.user_prompt,
