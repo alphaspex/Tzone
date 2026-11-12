@@ -8,7 +8,9 @@
     page: "overview",
     apiBase: localStorage.getItem("model-lab-api") || "",
     connected: false,
-    model: "GLM-4.7-Flash",
+    model: "Muse Spark 1.3",
+    modelSettings: null,
+    reasoningEffort: "auto",
     categories: [],
     levels: [],
     tests: [],
@@ -239,6 +241,24 @@
       '</div>';
   }
 
+  async function loadModelSettings(force) {
+    if (state.modelSettings && !force) return state.modelSettings;
+    const result = await api("/ui/settings");
+    state.modelSettings = result;
+    state.model = result.model_name || result.model || state.model;
+    state.reasoningEffort = result.reasoning_effort || "auto";
+    const top = $("#top-model");
+    if (top) top.textContent = state.model;
+    return result;
+  }
+  function reasoningOptions(settings) {
+    const options = [{value:"auto",label:"Meta default (" + (settings.meta_default_reasoning_effort || "model default") + ")"}];
+    (settings.reasoning_efforts || []).forEach(value => options.push({value,label:value.toUpperCase()}));
+    return options;
+  }
+  function difficultyLabel(test) {
+    return test.difficulty_label || ({easy:"Easy",mid:"Mid",hard:"Hard",expert:"Expert",adversarial:"Adversarial"}[test.difficulty]) || test.difficulty || "Custom";
+  }
   async function loadTestCatalog() {
     const [categories,tests] = await Promise.all([api("/ui/tests/categories"),api("/ui/tests")]);
     state.categories = categories.categories || [];
@@ -247,7 +267,7 @@
   }
   function testCard(test) {
     return '<article class="test-card"><div class="test-card-top"><span class="badge info">' +
-      esc(test.category.replace(/_/g," ")) + '</span><span class="badge">' + esc(test.difficulty) +
+      esc(test.category.replace(/_/g," ")) + '</span><span class="badge">' + esc(difficultyLabel(test)) +
       '</span></div><h3>' + esc(test.name) + '</h3><p>' + esc(test.description || test.user_prompt || "") +
       '</p><div class="tags">' + (test.is_builtin ? '<span class="tag">Built-in</span>' : '<span class="tag">Custom</span>') +
       (test.tool_names || []).map(name => '<span class="tag">' + esc(name) + '</span>').join("") +
@@ -259,9 +279,9 @@
   }
   async function renderBuilder() {
     const content = $("#page-content");
-    await loadTestCatalog();
+    await Promise.all([loadTestCatalog(),loadModelSettings()]);
     const categoryOptions = [{value:"",label:"All categories"}].concat(state.categories.map(x=>({value:x.id,label:x.name})));
-    const levelOptions = [{value:"",label:"All levels"}].concat(state.levels.map(x=>({value:x,label:x})));
+    const levelOptions = [{value:"",label:"All levels"}].concat(state.levels.map(x=>({value:x,label:({easy:"Easy",mid:"Mid",hard:"Hard",expert:"Expert",adversarial:"Adversarial"})[x] || x})));
     content.innerHTML = heading("Test Builder","Browse the preloaded test library or create your own custom test.",
       '<button class="btn primary" data-action="new-test">＋ Create custom test</button>') +
       '<div class="toolbar"><input class="input" id="test-search" placeholder="Search tests…" /><select class="select" id="test-category">' +
@@ -272,7 +292,7 @@
       '<div class="grid stats-grid">' + statCard("Built-in tests",state.tests.filter(x=>x.is_builtin).length,"Ready to run","✳") +
       statCard("Custom tests",state.tests.filter(x=>!x.is_builtin).length,"Created by you","＋") +
       statCard("Categories",state.categories.length,"Capability areas","▤") +
-      statCard("Difficulty levels",state.levels.length,"Foundation to adversarial","↗") + '</div>' +
+      statCard("Difficulty levels",state.levels.length,"Easy to adversarial","↗") + '</div>' +
       '<div class="test-list" id="test-list">' + state.tests.map(testCard).join("") + '</div>';
     $("#test-search").addEventListener("input",filterTests);
     $("#test-category").addEventListener("change",filterTests);
