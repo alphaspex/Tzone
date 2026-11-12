@@ -40,7 +40,7 @@ async def open_response(payload, path="responses", method="POST"):
         headers={
             "Authorization": f"Bearer {settings.meta_api_key}",
             "Content-Type": "application/json",
-            "Accept": "text/event-stream",
+            "Accept": "text/event-stream" if payload.get("stream") else "application/json",
         },
         json=payload if method.upper() != "GET" else None,
     )
