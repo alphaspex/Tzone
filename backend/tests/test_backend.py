@@ -2,6 +2,7 @@ import unittest
 
 from app import test_library, evaluator, tools, playground
 from app.main import app
+from app import ui_store
 
 
 class CatalogTests(unittest.TestCase):
@@ -65,6 +66,21 @@ class ToolTests(unittest.TestCase):
     def test_parameter_allowlist(self):
         result = playground.normalize_parameters({"temperature":0.2,"tools":[{"name":"bad"}],"max_tokens":50})
         self.assertEqual(result, {"temperature":0.2,"max_tokens":50})
+
+
+class MemoryBoundTests(unittest.TestCase):
+    def test_run_cache_is_bounded(self):
+        ui_store._RUNS.clear()
+        ui_store._EVENTS.clear()
+        for index in range(45):
+            ui_store._cache_run({"id": "run-" + str(index)})
+        self.assertLessEqual(len(ui_store._RUNS), ui_store._MAX_MEMORY_RUNS)
+
+    def test_custom_cache_is_bounded(self):
+        ui_store._CUSTOM.clear()
+        for index in range(220):
+            ui_store._cache_custom({"id": "custom-" + str(index)})
+        self.assertLessEqual(len(ui_store._CUSTOM), ui_store._MAX_CUSTOM)
 
 
 class ApiTests(unittest.TestCase):
