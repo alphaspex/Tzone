@@ -282,7 +282,8 @@ async def export_test_run(run_id: str, format: str = "json"):
         ]
         for item in assertion.get("assertions",[]):
             lines.append(f"- [{'x' if item.get('passed') else ' '}] {item.get('type')}: {item.get('detail')}")
-        lines.extend(["","## Model evaluation",json.dumps(result.get("model_evaluation"),ensure_ascii=False,indent=2),
+        lines.extend(["","## Usage",json.dumps({"agent":result.get("usage"),"judge":result.get("judge_usage"),"latency_ms":result.get("latency_ms")},ensure_ascii=False,indent=2),
+                      "","## Model evaluation",json.dumps(result.get("model_evaluation"),ensure_ascii=False,indent=2),
                       "","## Tool events",json.dumps(result.get("tool_events",[]),ensure_ascii=False,indent=2),
                       "","## Errors",json.dumps(result.get("errors",[]),ensure_ascii=False,indent=2)])
         return PlainTextResponse("\n".join(lines),media_type="text/markdown",
