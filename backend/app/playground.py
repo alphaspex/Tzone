@@ -68,7 +68,6 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
     model_params = normalize_parameters(parameters)
     model_params.setdefault("max_tokens", 1024)
     model_params.setdefault("temperature", 0.4)
-    max_steps = settings.max_agent_steps
     call_events, response_parts, usage = [], [], {}
     try:
         step = 0
