@@ -181,7 +181,7 @@
   async function getDashboard() {
     try {
       const result = await api("/ui/dashboard");
-      state.model = result.model || state.model;
+      state.model = result.model_name || result.model || state.model;
       setConnected(true, state.model);
       return result;
     } catch (error) {
@@ -236,7 +236,7 @@
         '</strong></div>') +
       panel("Workspace shortcuts","Jump into a workflow",'<div class="activity-list">' +
         '<div class="activity-item"><span class="activity-marker"></span><div><button class="text-link" data-page="builder">Build a manual test →</button><div class="activity-meta">Create and save your own prompt and assertions.</div></div></div>' +
-        '<div class="activity-item"><span class="activity-marker green"></span><div><button class="text-link" data-page="agent">Open Harness Agent →</button><div class="activity-meta">Chat with GLM and watch its tool usage live.</div></div></div>' +
+        '<div class="activity-item"><span class="activity-marker green"></span><div><button class="text-link" data-page="agent">Open Harness Agent →</button><div class="activity-meta">Chat with Muse and watch its tool usage live.</div></div></div>' +
         '<div class="activity-item"><span class="activity-marker"></span><div><button class="text-link" data-page="metrics">Inspect model metrics →</button><div class="activity-meta">Review latency and token usage.</div></div></div></div>') +
       '</div>';
   }
@@ -525,6 +525,7 @@
       statCard("Latency",formatDuration(run.latency_ms),"End-to-end","◷") +
       statCard("Assertions",assertion.total == null ? "—" : (assertion.passed_count || 0) + "/" + assertion.total,"Deterministic checks","✓") +
       statCard("Judge score",result.model_evaluation && result.model_evaluation.score != null ? result.model_evaluation.score + "/100" : "—","Separate evaluator","◎") +
+      statCard("Estimated cost",result.estimated_cost_usd==null?"—":"$"+Number(result.estimated_cost_usd).toFixed(6),"Meta token-rate estimate","$") +
       statCard("Total tokens",(result.usage || {}).total_tokens || "—","Provider usage","▤") + '</div>' +
       panel("Live activity","Token stream, agent activity, tools, metrics and evaluation",'<div class="event-stream" id="run-events">' +
         events.slice(-180).map(renderEvent).join("") + (events.length ? "" : '<div class="muted">Waiting for run events…</div>') + '</div>') +
