@@ -70,7 +70,7 @@ def _validate_custom_test(body, existing=None):
         "expected_output":str(data.get("expected_output",""))[:8000],
         "assertions":assertions,
         "judge_rubric":str(data.get("judge_rubric",""))[:3000],
-        "tool_names":[n for n in data.get("tool_names",[]) if n in tools.available_names()],
+        "tool_names":[n for n in data.get("tool_names",[]) if n in tools.available_names()] if data.get("tool_names") else tools.select_for_task(prompt),
         "parameters":parameters,
         "tags":[str(x)[:40] for x in data.get("tags",[])[:20]],
         "is_builtin":False,
