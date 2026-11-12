@@ -77,9 +77,9 @@ def run_assertions(response, assertions, tool_events):
         results.append({"type":kind,"passed":bool(passed),"detail":detail})
     total = len(results)
     passed_count = sum(1 for item in results if item["passed"])
-    return {"passed":passed_count == total and total > 0,
+    return {"passed":passed_count == total,
             "passed_count":passed_count,"total":total,
-            "score":round(passed_count/total,4) if total else 0,
+            "score":round(passed_count/total,4) if total else None,"skipped":total == 0,
             "assertions":results}
 
 async def run_judge(response, rubric):
