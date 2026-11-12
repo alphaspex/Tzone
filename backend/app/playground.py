@@ -2,6 +2,7 @@
 import json
 import time
 import uuid
+import traceback
 from . import provider, tools, ui_store
 from .config import settings
 
@@ -55,6 +56,7 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
             async for event in provider.stream_chat(payload):
                 if event.get("usage"):
                     usage.update(event["usage"])
+                    yield {"type":"metrics","usage":dict(usage)}
                 for choice in event.get("choices", []):
                     delta = choice.get("delta") or {}
                     if delta.get("content"):
@@ -110,5 +112,5 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
                "usage":usage,"latency_ms":round(latency_ms,2),
                "tool_names":selected_names,"model":settings.model}
     except Exception as exc:
-        yield {"type":"error","message":str(exc)[:1200],"tool_events":call_events,
+        yield {"type":"error","message":str(exc)[:1200],"traceback":traceback.format_exc()[-6000:],"tool_events":call_events,
                "latency_ms":round((time.monotonic()-started)*1000,2)}
