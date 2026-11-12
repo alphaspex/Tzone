@@ -199,7 +199,7 @@
     const active = data.active_runs || [];
     const rows = runs.length ? '<div class="table-wrap"><table><thead><tr><th>TEST</th><th>STATUS</th><th>RESULT</th><th>LATENCY</th><th>CREATED</th><th></th></tr></thead><tbody>' +
       runs.map(run => '<tr><td><strong>' + esc(run.test_name || run.test_id) + '</strong><div class="muted">' +
-        esc(run.category || "") + ' · ' + esc(run.difficulty || "") + '</div></td><td>' +
+        esc(run.category || "") + ' · ' + esc(run.difficulty_label || run.difficulty || "") + '</div></td><td>' +
         statusBadge(run.status) + '</td><td>' + statusBadge(run.status, run.passed) +
         '</td><td>' + formatDuration(run.latency_ms) + '</td><td>' + formatTime(run.created_at) +
         '</td><td><button class="btn small" data-action="view-run" data-id="' + esc(run.id) + '">Open</button></td></tr>').join("") +
@@ -252,8 +252,13 @@
     return result;
   }
   function reasoningOptions(settings) {
+    const labels = {
+      minimal:"Minimal — lowest effort", low:"Low — light reasoning",
+      medium:"Medium — balanced reasoning", high:"High — deeper reasoning",
+      xhigh:"XHigh — very deep reasoning", max:"Max — maximum supported"
+    };
     const options = [{value:"auto",label:"Meta default (" + (settings.meta_default_reasoning_effort || "model default") + ")"}];
-    (settings.reasoning_efforts || []).forEach(value => options.push({value,label:value.toUpperCase()}));
+    (settings.reasoning_efforts || []).forEach(value => options.push({value,label:labels[value] || value}));
     return options;
   }
   function difficultyLabel(test) {
@@ -405,7 +410,7 @@
       const result = await api("/ui/tests/" + encodeURIComponent(id));
       state.selectedTest = result;
       const safeView = {
-        name:result.name,category:result.category,difficulty:result.difficulty,
+        name:result.name,category:result.category,difficulty:result.difficulty_label || difficultyLabel(result),
         description:result.description,user_prompt:result.user_prompt,
         expected_output:result.expected_output,assertions:result.assertions,
         tools:result.tool_names,parameters:result.parameters,
