@@ -68,10 +68,12 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
     model_params = normalize_parameters(parameters)
     model_params.setdefault("max_tokens", 1024)
     model_params.setdefault("temperature", 0.4)
-    max_steps = max(1, min(int(settings.max_agent_steps), 8))
+    max_steps = settings.max_agent_steps
     call_events, response_parts, usage = [], [], {}
     try:
-        for step in range(max_steps):
+        step = 0
+        while True:
+            step += 1
             payload = {"model":settings.model,"messages":messages,"stream":True,
                        "stream_options":{"include_usage":True}, **model_params}
             if tool_defs:
@@ -125,8 +127,7 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
                 await ui_store.save_tool_event(session_id,name,args,output,status)
                 yield {"type":"tool_result",**record}
                 messages.append({"role":"tool","tool_call_id":call_id,"content":json.dumps(output,ensure_ascii=False)})
-            if step == max_steps - 1:
-                response_parts.append("\n[Execution step limit reached.]")
+
         final_text = "".join(response_parts)[:100000]
         await ui_store.save_chat_message(session_id,"assistant",final_text)
         latency_ms = (time.monotonic()-started)*1000
