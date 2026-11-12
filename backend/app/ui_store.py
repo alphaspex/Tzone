@@ -111,35 +111,48 @@ async def save_harness_settings(value):
             ["model", json.dumps(item, ensure_ascii=False)])
     return dict(_HARNESS_SETTINGS)
 
-async def get_agent_state(session_id):
-    if session_id in _AGENT_STATES:
-        return list(_AGENT_STATES[session_id])
-    if not store.configured():
+async def get_agent_state(session_id, model_id=None):
+    cached = _AGENT_STATES.get(session_id)
+    if cached is not None:
+        state = cached if isinstance(cached, dict) else {"model_id": None, "items": cached}
+    elif store.configured():
+        rows = await _rows("SELECT state_json FROM agent_states WHERE session_id = ? LIMIT 1", [session_id])
+        if not rows:
+            return []
+        state = _json(rows[0].get("state_json"), {})
+        if isinstance(state, list):
+            state = {"model_id": None, "items": state}
+        if not isinstance(state, dict):
+            return []
+    else:
         return []
-    rows = await _rows("SELECT state_json FROM agent_states WHERE session_id = ? LIMIT 1", [session_id])
-    if not rows:
+    if model_id and state.get("model_id") and state.get("model_id") != model_id:
+        await save_agent_state(session_id, [], model_id)
         return []
-    state = _json(rows[0].get("state_json"), [])
-    if not isinstance(state, list):
+    items = state.get("items") or []
+    if not isinstance(items, list):
         return []
-    _AGENT_STATES[session_id] = state
+    _AGENT_STATES[session_id] = {"model_id": model_id or state.get("model_id"), "items": items}
     while len(_AGENT_STATES) > _MAX_AGENT_STATES:
         _AGENT_STATES.pop(next(iter(_AGENT_STATES)), None)
-    return list(state)
+    return list(items)
 
-async def save_agent_state(session_id, items):
-    state = list(items or [])
-    encoded = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+
+async def save_agent_state(session_id, items, model_id=None):
+    item_list = list(items or [])
+    record = {"model_id": model_id, "items": item_list}
+    encoded = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     if len(encoded) > _MAX_AGENT_STATE_CHARS:
         raise ValueError("Conversation state exceeded the 4 MB replay limit. Start a new conversation or remove older context.")
-    _AGENT_STATES[session_id] = state
+    _AGENT_STATES[session_id] = record
     while len(_AGENT_STATES) > _MAX_AGENT_STATES:
         _AGENT_STATES.pop(next(iter(_AGENT_STATES)), None)
     if store.configured():
         await store.execute(
             "INSERT INTO agent_states (session_id, state_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json, updated_at = CURRENT_TIMESTAMP",
             [session_id, encoded])
-    return len(state)
+    return len(item_list)
+
 
 async def save_custom_test(test):
     item = dict(test)
