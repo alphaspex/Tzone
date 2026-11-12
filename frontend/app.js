@@ -310,7 +310,7 @@
       '<div class="field"><label for="test-max-tokens">Maximum output tokens</label><input class="input" id="test-max-tokens" type="number" min="1" max="8192" value="' + esc(params.max_tokens) + '"></div>' +
       '<div class="field"><label for="test-presence">Presence penalty</label><input class="input" id="test-presence" type="number" min="-2" max="2" step="0.1" value="' + esc(params.presence_penalty || 0) + '"></div>' +
       '<div class="field"><label for="test-frequency">Frequency penalty</label><input class="input" id="test-frequency" type="number" min="-2" max="2" step="0.1" value="' + esc(params.frequency_penalty || 0) + '"></div>' +
-      '<div class="field"><label for="test-timeout">Timeout (seconds)</label><input class="input" id="test-timeout" type="number" min="5" max="300" value="' + esc(data.timeout_seconds || 90) + '"></div>' +
+
       textareaField("Additional model parameters (JSON)","test-extra-params",pretty(Object.fromEntries(Object.entries(params).filter(([key])=>!["temperature","top_p","max_tokens","presence_penalty","frequency_penalty"].includes(key)))),4,"Optional provider-specific parameters, such as stop, response_format, seed, logit_bias, or user.") +
       '<div class="field full"><div class="info-row"><span>Tool assignment</span><strong>Automatic from test prompt unless explicitly supplied</strong></div><div class="hint">The model sees only ordinary tool definitions selected for this scenario. Evaluation rules stay hidden.</div></div>' +
       '<div class="field full"><div class="heading-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">' +
@@ -350,7 +350,6 @@
         assertions:assertions,
         judge_rubric:$("#test-expected").value,
         parameters:parameters,
-        timeout_seconds:Number($("#test-timeout").value),
         tool_names:[]
       };
       try {
@@ -390,7 +389,6 @@
         name:test.name,category:test.category,difficulty:test.difficulty,
         description:test.description,user_prompt:test.user_prompt,
         tools:test.tool_names,parameters:test.parameters,
-        timeout_seconds:test.timeout_seconds || 90,
         expected_output:test.expected_output,
         assertions:test.assertions,
         judge_rubric:test.judge_rubric
@@ -399,7 +397,7 @@
         '<div class="code-note">Review the exact task setup. Expected output and evaluation rules remain outside the tested model context.</div>'+
         '<div class="grid two-col" style="margin-top:12px"><div><div class="panel-title">Agent receives</div><pre class="result-block">'+esc(pretty({system_prompt:test.system_prompt,user_prompt:test.user_prompt,tools:test.tool_names,parameters:test.parameters}))+'</pre></div>'+
         '<div><div class="panel-title">Evaluator keeps private</div><pre class="result-block">'+esc(pretty({expected_output:test.expected_output,assertions:test.assertions,judge_rubric:test.judge_rubric}))+'</pre></div></div>'+
-        '<div class="info-row"><span>Timeout</span><strong>'+esc(test.timeout_seconds || 90)+' seconds</strong></div>'+
+
         '<div class="heading-actions" style="margin-top:15px"><button class="btn" data-action="close-modal">Back</button><button class="btn primary" data-action="confirm-run" data-id="'+esc(id)+'">Confirm and run →</button></div></div></div>';
     } catch(error){toast(error.message,true);}
   }
@@ -843,7 +841,7 @@
       '<form id="settings-form" class="form-grid"><div class="field full"><label for="api-base">Backend base URL</label><input class="input" id="api-base" placeholder="https://your-service.example.com" value="'+esc(state.apiBase)+'"><div class="hint">Enter the deployed Deplexo service URL, without /ui at the end. Saved in this browser only.</div></div>'+
       '<div class="field full"><div class="heading-actions"><button class="btn primary" type="submit">Save connection</button><button class="btn" type="button" data-action="test-connection">Test connection</button></div></div></form>'+
       '<div id="connection-result" class="hint" style="margin-top:12px"></div></section>'+
-      panel("Backend configuration","Read-only environment details",'<div class="info-row"><span>Model</span><strong>'+esc(settings.model||"—")+'</strong></div><div class="info-row"><span>Provider key</span><strong>'+ (settings.provider_configured?'<span class="badge pass">Configured</span>':'<span class="badge fail">Missing</span>')+'</strong></div><div class="info-row"><span>Cloudflare D1</span><strong>'+ (settings.d1_configured?'<span class="badge pass">Configured</span>':'<span class="badge">Memory fallback</span>')+'</strong></div><div class="info-row"><span>Max agent steps</span><strong>'+esc(settings.max_agent_steps||"—")+'</strong></div><div class="info-row"><span>Request timeout</span><strong>'+esc(settings.request_timeout_seconds||"—")+' s</strong></div>')+'</div>'+
+      panel("Backend configuration","Read-only environment details",'<div class="info-row"><span>Model</span><strong>'+esc(settings.model||"—")+'</strong></div><div class="info-row"><span>Provider key</span><strong>'+ (settings.provider_configured?'<span class="badge pass">Configured</span>':'<span class="badge fail">Missing</span>')+'</strong></div><div class="info-row"><span>Cloudflare D1</span><strong>'+ (settings.d1_configured?'<span class="badge pass">Configured</span>':'<span class="badge">Memory fallback</span>')+'</strong></div><div class="info-row"><span>Max agent steps</span><strong>'+(Number(settings.max_agent_steps)===0?"Unlimited":esc(settings.max_agent_steps))+'</strong></div><div class="info-row"><span>Request timeout</span><strong>'+esc(settings.request_timeout_seconds||"—")+' s</strong></div>')+'</div>'+
       panel("Runtime policy","Current safeguards",'<div class="info-row"><span>Worker model</span><strong>Single worker</strong></div><div class="info-row"><span>Test concurrency</span><strong>1 active test run</strong></div><div class="info-row"><span>Agent permissions</span><strong>Local tools only</strong></div><div class="info-row"><span>Evaluation visibility</span><strong>Hidden from tested agent</strong></div><div class="info-row"><span>Authentication</span><strong><span class="badge fail">Disabled</span></strong></div><p class="hint">The backend has no application authentication, as configured. Restrict public ingress before sharing this URL; any reachable caller can consume model quota.</p>');
     $("#settings-form").addEventListener("submit",e=>{
       e.preventDefault();
