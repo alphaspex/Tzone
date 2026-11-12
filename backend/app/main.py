@@ -50,11 +50,15 @@ async def _meta_proxy(request: Request, path: str):
     if not isinstance(body, dict):
         return _api_error("Request body must be a JSON object.")
 
-    if path == "responses":
+    if path in ("responses", "responses/input_tokens"):
         configured = await model_settings.get_settings()
-        body.setdefault("model", configured["model"])
-        if not isinstance(body.get("model"), str) or not model_catalog.get_model(body["model"]):
-            return _api_error("Unsupported Meta model. Retrieve available IDs from GET /v1/models.", status=400)
+        requested_model = body.get("model")
+        if requested_model not in (None, configured["model"]):
+            return _api_error(
+                "This harness uses one globally selected Meta model: " + configured["model"],
+                status=400,
+            )
+        body["model"] = configured["model"]
         if body.get("reasoning") is not None:
             reasoning = body["reasoning"]
             if not isinstance(reasoning, dict):
@@ -127,8 +131,7 @@ async def models():
     return {
         "object": "list",
         "data": [
-            {"id": item["id"], "object": "model", "created": 0, "owned_by": "meta"}
-            for item in model_catalog.list_models()
+            {"id": (await model_settings.get_settings())["model"], "object": "model", "created": 0, "owned_by": "meta"}
         ],
     }
 
