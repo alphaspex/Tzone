@@ -1,0 +1,212 @@
+"""UI persistence boundary. Inputs: typed records from UI services. Outputs: decoded records; bounded memory fallback when D1 is not configured."""
+import json
+from collections import deque
+from . import store
+
+_CUSTOM = {}
+_RUNS = {}
+_EVENTS = {}
+_MESSAGES = {}
+_METRICS = deque(maxlen=5000)
+_TOOL_EVENTS = deque(maxlen=2000)
+_MAX_MEMORY_RUNS = 200
+_MAX_CUSTOM = 500
+
+def _json(value, default=None):
+    if value is None:
+        return default
+    try:
+        return json.loads(value) if isinstance(value, str) else value
+    except Exception:
+        return default
+
+async def _rows(sql, params=None):
+    raw = await store.execute(sql, params or [])
+    if not raw:
+        return []
+    if isinstance(raw, dict):
+        return raw.get("results") or []
+    if isinstance(raw, list):
+        rows = []
+        for item in raw:
+            if isinstance(item, dict) and isinstance(item.get("results"), list):
+                rows.extend(item["results"])
+        return rows
+    return []
+
+async def start_ui_store():
+    statements = [
+        "CREATE TABLE IF NOT EXISTS custom_tests (id TEXT PRIMARY KEY, category TEXT NOT NULL, difficulty TEXT, definition_json TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS run_events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, event_type TEXT NOT NULL, event_json TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+        "CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id)",
+        "CREATE INDEX IF NOT EXISTS idx_test_runs_created ON test_runs(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, id)",
+    ]
+    if store.configured():
+        for sql in statements:
+            await store.execute(sql)
+
+async def save_custom_test(test):
+    item = dict(test)
+    _CUSTOM[item["id"]] = item
+    while len(_CUSTOM) > _MAX_CUSTOM:
+        _CUSTOM.pop(next(iter(_CUSTOM)))
+    if store.configured():
+        await store.execute(
+            "INSERT INTO custom_tests (id, category, difficulty, definition_json, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET category=excluded.category, difficulty=excluded.difficulty, definition_json=excluded.definition_json, updated_at=CURRENT_TIMESTAMP",
+            [item["id"], item.get("category","custom_prompts"), item.get("difficulty","custom"), json.dumps(item, ensure_ascii=False)])
+    return item
+
+async def get_custom_test(test_id):
+    if test_id in _CUSTOM:
+        return dict(_CUSTOM[test_id])
+    if not store.configured():
+        return None
+    rows = await _rows("SELECT definition_json FROM custom_tests WHERE id = ? LIMIT 1", [test_id])
+    if not rows:
+        return None
+    item = _json(rows[0].get("definition_json"), {})
+    if item:
+        _CUSTOM[test_id] = item
+    return item or None
+
+async def list_custom_tests():
+    if not store.configured():
+        return [dict(x) for x in _CUSTOM.values()]
+    rows = await _rows("SELECT definition_json FROM custom_tests ORDER BY updated_at DESC LIMIT 500")
+    result = []
+    for row in rows:
+        item = _json(row.get("definition_json"), {})
+        if item:
+            _CUSTOM[item.get("id")] = item
+            result.append(item)
+    return result
+
+async def delete_custom_test(test_id):
+    existed = test_id in _CUSTOM
+    _CUSTOM.pop(test_id, None)
+    if store.configured():
+        await store.execute("DELETE FROM custom_tests WHERE id = ?", [test_id])
+        return True
+    return existed
+
+async def create_run(run):
+    item = dict(run)
+    _RUNS[item["id"]] = item
+    while len(_RUNS) > _MAX_MEMORY_RUNS:
+        _RUNS.pop(next(iter(_RUNS)))
+        _EVENTS.pop(next(iter(_EVENTS)), None)
+    if store.configured():
+        await store.execute(
+            "INSERT INTO test_runs (id, session_id, test_name, status, details_json) VALUES (?, ?, ?, ?, ?)",
+            [item["id"], item.get("session_id", item["id"]), item.get("test_id",""), item.get("status","queued"), json.dumps(item, ensure_ascii=False)])
+    return item
+
+async def update_run(run_id, changes):
+    item = await get_run(run_id)
+    if not item:
+        return None
+    item.update(changes)
+    _RUNS[run_id] = item
+    if store.configured():
+        await store.execute("UPDATE test_runs SET status = ?, details_json = ? WHERE id = ?",
+                            [item.get("status","unknown"), json.dumps(item, ensure_ascii=False), run_id])
+    return item
+
+async def get_run(run_id):
+    if run_id in _RUNS:
+        return dict(_RUNS[run_id])
+    if not store.configured():
+        return None
+    rows = await _rows("SELECT id, session_id, test_name, status, details_json, created_at FROM test_runs WHERE id = ? LIMIT 1", [run_id])
+    if not rows:
+        return None
+    row = rows[0]
+    item = _json(row.get("details_json"), {})
+    item.update({"id":row.get("id"),"session_id":row.get("session_id"),"test_id":row.get("test_name"),"status":row.get("status"),"created_at":row.get("created_at")})
+    _RUNS[run_id] = item
+    return item
+
+async def list_runs(limit=100):
+    limit = max(1, min(int(limit), 200))
+    if not store.configured():
+        return list(_RUNS.values())[-limit:][::-1]
+    rows = await _rows("SELECT id, session_id, test_name, status, details_json, created_at FROM test_runs ORDER BY created_at DESC LIMIT ?", [limit])
+    result = []
+    for row in rows:
+        item = _json(row.get("details_json"), {})
+        item.update({"id":row.get("id"),"session_id":row.get("session_id"),"test_id":row.get("test_name"),"status":row.get("status"),"created_at":row.get("created_at")})
+        _RUNS[item["id"]] = item
+        result.append(item)
+    return result
+
+async def save_run_event(run_id, event):
+    item = dict(event)
+    _EVENTS.setdefault(run_id, deque(maxlen=2000)).append(item)
+    if store.configured():
+        await store.execute("INSERT INTO run_events (run_id, event_type, event_json) VALUES (?, ?, ?)",
+                            [run_id, item.get("type","event"), json.dumps(item, ensure_ascii=False)])
+
+async def list_run_events(run_id):
+    if not store.configured():
+        return list(_EVENTS.get(run_id, []))
+    rows = await _rows("SELECT event_json FROM run_events WHERE run_id = ? ORDER BY id ASC LIMIT 2000", [run_id])
+    return [_json(row.get("event_json"), {}) for row in rows]
+
+async def save_chat_message(session_id, role, content):
+    _MESSAGES.setdefault(session_id, []).append({"role":role,"content":content})
+    if len(_MESSAGES[session_id]) > 200:
+        _MESSAGES[session_id] = _MESSAGES[session_id][-200:]
+    if store.configured():
+        await store.save_message(session_id, role, content)
+
+async def get_messages(session_id, limit=100):
+    if not store.configured():
+        return list(_MESSAGES.get(session_id, []))[-max(1,min(limit,200)):]
+    rows = await _rows("SELECT role, content, created_at FROM messages WHERE session_id = ? ORDER BY id ASC LIMIT ?", [session_id, max(1,min(limit,200))])
+    result = []
+    for row in rows:
+        result.append({"role":row.get("role"),"content":_json(row.get("content"),row.get("content")),"created_at":row.get("created_at")})
+    return result
+
+async def list_conversations(limit=100):
+    if not store.configured():
+        ids = list(_MESSAGES.keys())[-max(1,min(limit,200)):]
+        return [{"id":sid,"message_count":len(_MESSAGES.get(sid,[]))} for sid in reversed(ids)]
+    rows = await _rows("SELECT s.id, s.created_at, (SELECT COUNT(*) FROM messages m WHERE m.session_id=s.id) AS message_count FROM sessions s ORDER BY s.created_at DESC LIMIT ?", [max(1,min(limit,200))])
+    return rows
+
+async def save_tool_event(session_id, name, args, output, status="ok"):
+    item = {"session_id":session_id,"tool_name":name,"input":args,"output":output,"status":status}
+    _TOOL_EVENTS.append(item)
+    if store.configured():
+        await store.save_tool_event(session_id, name, args, output, status)
+
+async def list_tool_events(session_id=None, limit=200):
+    if not store.configured():
+        result = list(_TOOL_EVENTS)
+        if session_id:
+            result = [x for x in result if x["session_id"] == session_id]
+        return result[-max(1,min(limit,500)):]
+    if session_id:
+        rows = await _rows("SELECT session_id, tool_name, input_json, output_json, status, created_at FROM tool_events WHERE session_id = ? ORDER BY id DESC LIMIT ?", [session_id,max(1,min(limit,500))])
+    else:
+        rows = await _rows("SELECT session_id, tool_name, input_json, output_json, status, created_at FROM tool_events ORDER BY id DESC LIMIT ?", [max(1,min(limit,500))])
+    return [{"session_id":r.get("session_id"),"tool_name":r.get("tool_name"),"input":_json(r.get("input_json"),{}),"output":_json(r.get("output_json"),{}),"status":r.get("status"),"created_at":r.get("created_at")} for r in rows]
+
+async def save_metric(session_id, name, value):
+    item = {"session_id":session_id,"metric":name,"value":float(value)}
+    _METRICS.append(item)
+    if store.configured():
+        await store.save_metric(session_id, name, value)
+
+async def list_metrics(session_id=None, limit=500):
+    limit = max(1,min(limit,2000))
+    if not store.configured():
+        result = list(_METRICS)
+        return [x for x in result if not session_id or x["session_id"] == session_id][-limit:]
+    if session_id:
+        rows = await _rows("SELECT session_id, metric, value, created_at FROM metrics WHERE session_id = ? ORDER BY id DESC LIMIT ?", [session_id,limit])
+    else:
+        rows = await _rows("SELECT session_id, metric, value, created_at FROM metrics ORDER BY id DESC LIMIT ?", [limit])
+    return rows
