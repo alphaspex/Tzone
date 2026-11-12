@@ -75,7 +75,7 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
         selected_names = list(tool_names) if tool_names is not None else tools.select_for_task(user_text)
         selected_names = [name for name in selected_names if name in tools.available_names()]
         tool_defs = tools.responses_definitions(selected_names)
-        input_items = await ui_store.get_agent_state(session_id)
+        input_items = await ui_store.get_agent_state(session_id, model_id)
         if not input_items and system_prompt:
             input_items.append({
                 "role": "developer",
@@ -194,7 +194,7 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
                     "call_id": call_id,
                     "output": json.dumps(output, ensure_ascii=False),
                 })
-            await ui_store.save_agent_state(session_id, input_items)
+            await ui_store.save_agent_state(session_id, input_items, model_id)
 
         final_text = "".join(response_parts) or _response_text(final_response)
         final_text = final_text[:100000]
