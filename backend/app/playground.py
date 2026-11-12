@@ -13,11 +13,37 @@ _PARAMETER_KEYS = {
 }
 
 def normalize_parameters(parameters):
+    """Pass only supported, bounded provider parameters."""
+    source = parameters if isinstance(parameters, dict) else {}
     result = {}
-    for key, value in (parameters or {}).items():
-        if key in _PARAMETER_KEYS and value is not None:
-            result[key] = value
+    if "temperature" in source:
+        result["temperature"] = max(0.0, min(2.0, float(source["temperature"])))
+    if "top_p" in source:
+        result["top_p"] = max(0.0, min(1.0, float(source["top_p"])))
+    if "max_tokens" in source:
+        result["max_tokens"] = max(1, min(8192, int(source["max_tokens"])))
+    for key in ("presence_penalty", "frequency_penalty"):
+        if key in source:
+            result[key] = max(-2.0, min(2.0, float(source[key])))
+    if "stop" in source:
+        stop = source["stop"]
+        if isinstance(stop, str):
+            result["stop"] = stop[:256]
+        elif isinstance(stop, list):
+            result["stop"] = [str(x)[:128] for x in stop[:4]]
+    if isinstance(source.get("response_format"), dict):
+        result["response_format"] = source["response_format"]
+    if "seed" in source:
+        result["seed"] = int(source["seed"])
+    if isinstance(source.get("logit_bias"), dict):
+        result["logit_bias"] = {str(k):max(-100,min(100,int(v))) for k,v in list(source["logit_bias"].items())[:128]}
+    if "user" in source:
+        result["user"] = str(source["user"])[:128]
+    # The service deliberately supports only one completion per request.
+    if "n" in source:
+        result["n"] = 1
     return result
+
 
 async def stream_turn(session_id, user_text, tool_names=None, parameters=None, system_prompt="", history=None):
     """Yield {type, ...} events. Hidden expected outputs and evaluator rules are never accepted here."""
