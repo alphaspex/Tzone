@@ -1,0 +1,27 @@
+name: Backend validation
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-check.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-check.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Compile backend
+        run: python -m compileall -q backend/app backend/tests
+      - name: Run unit tests
+        working-directory: backend
+        run: python -m unittest discover -s tests -v
