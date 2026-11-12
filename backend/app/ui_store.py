@@ -7,11 +7,11 @@ _CUSTOM = {}
 _RUNS = {}
 _EVENTS = {}
 _MESSAGES = {}
-_METRICS = deque(maxlen=5000)
-_TOOL_EVENTS = deque(maxlen=2000)
-_MAX_MEMORY_RUNS = 50
-_MAX_MEMORY_CONVERSATIONS = 64
-_MAX_CUSTOM = 500
+_METRICS = deque(maxlen=2000)
+_TOOL_EVENTS = deque(maxlen=1000)
+_MAX_MEMORY_RUNS = 30
+_MAX_MEMORY_CONVERSATIONS = 32
+_MAX_CUSTOM = 200
 
 def _json(value, default=None):
     if value is None:
@@ -144,7 +144,7 @@ async def list_runs(limit=100):
 
 async def save_run_event(run_id, event):
     item = dict(event)
-    _EVENTS.setdefault(run_id, deque(maxlen=2000)).append(item)
+    _EVENTS.setdefault(run_id, deque(maxlen=500)).append(item)
     if store.configured():
         await store.execute("INSERT INTO run_events (run_id, event_type, event_json) VALUES (?, ?, ?)",
                             [run_id, item.get("type","event"), json.dumps(item, ensure_ascii=False)])
@@ -158,9 +158,10 @@ async def list_run_events(run_id):
 async def save_chat_message(session_id, role, content):
     if session_id not in _MESSAGES and len(_MESSAGES) >= _MAX_MEMORY_CONVERSATIONS:
         _MESSAGES.pop(next(iter(_MESSAGES)), None)
-    _MESSAGES.setdefault(session_id, []).append({"role":role,"content":content})
-    if len(_MESSAGES[session_id]) > 200:
-        _MESSAGES[session_id] = _MESSAGES[session_id][-200:]
+    memory_content = content[:8000] if isinstance(content, str) else content
+    _MESSAGES.setdefault(session_id, []).append({"role":role,"content":memory_content})
+    if len(_MESSAGES[session_id]) > 60:
+        _MESSAGES[session_id] = _MESSAGES[session_id][-60:]
     if store.configured():
         await store.save_message(session_id, role, content)
 
@@ -181,7 +182,12 @@ async def list_conversations(limit=100):
     return rows
 
 async def save_tool_event(session_id, name, args, output, status="ok"):
-    item = {"session_id":session_id,"tool_name":name,"input":args,"output":output,"status":status}
+    def bounded(value):
+        encoded = json.dumps(value, ensure_ascii=False)
+        if len(encoded) <= 6000:
+            return value
+        return {"truncated":True,"preview":encoded[:5800]}
+    item = {"session_id":session_id,"tool_name":name,"input":bounded(args),"output":bounded(output),"status":status}
     _TOOL_EVENTS.append(item)
     if store.configured():
         await store.save_tool_event(session_id, name, args, output, status)
