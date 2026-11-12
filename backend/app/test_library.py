@@ -17,7 +17,7 @@ _SCENARIOS = {
         ("Argument analysis", "A town added bike lanes and traffic injuries fell the next month. Does this alone prove the bike lanes caused the decrease? Explain what can and cannot be concluded.", "Correlation alone does not prove causation", [{"type":"contains_any","values":["does not prove","cannot establish","not enough evidence"]}], []),
     ],
     "instruction_following": [
-        ("Exact item count", "Name exactly four primary colors of light. Return a numbered list and nothing else.", "Four numbered items", [{"type":"numbered_items","count":4}], []),
+        ("Exact item count", "Name exactly four practical ways to reduce household electricity use. Return a numbered list and nothing else.", "Four distinct numbered suggestions", [{"type":"numbered_items","count":4}], []),
         ("Word limit", "Explain photosynthesis in no more than 35 words. Do not use a list.", "Concise explanation under 36 words", [{"type":"max_words","value":35},{"type":"not_contains","value":"\n- "}], []),
         ("Structured response", "Return exactly these headings in this order: Summary, Risks, Next step. Give one short sentence under each heading.", "Three ordered headings", [{"type":"headings_in_order","values":["Summary","Risks","Next step"]}], []),
     ],
@@ -32,9 +32,9 @@ _SCENARIOS = {
         ("Remember and retrieve", "Store the phrase 'blue lantern 42' under the key project_code, then retrieve it and tell me the value.", "blue lantern 42", [{"type":"tool_called","name":"memory_set"},{"type":"tool_called","name":"memory_get"},{"type":"contains","value":"blue lantern 42"}], ["memory_set","memory_get"]),
     ],
     "multi_turn": [
-        ("Remember a preference", "I prefer concise answers and use metric units.", "Remember the preference for later turns", [{"type":"tool_called","name":"memory_set"}], ["memory_set","memory_get"], ["I am planning a 5-kilometre walk. What units should you use for distance?"]),
-        ("Carry forward a constraint", "For this conversation, keep examples vegetarian.", "Retain the vegetarian constraint", [{"type":"contains_any","values":["vegetarian","plant-based","meat-free"]}], [], ["Suggest a simple dinner idea for tonight."]),
-        ("Resolve a reference", "Call the fictional device 'Orion'. Its battery capacity is 6400 mAh.", "Retain Orion and capacity", [{"type":"contains","value":"Orion"}], [], ["What battery capacity did I give for the device?"]),
+        ("Remember a preference", "I prefer concise answers and use metric units. Please remember these preferences for the rest of our conversation.", "Remember the preference for later turns", [{"type":"tool_called","name":"memory_set"}], ["memory_set","memory_get"], ["I am planning a 5-kilometre walk. What units should you use for distance?"]),
+        ("Carry forward a constraint", "For this conversation, please remember to keep examples vegetarian.", "Retain the vegetarian constraint", [{"type":"contains_any","values":["vegetarian","plant-based","meat-free"]}], [], ["Suggest a simple dinner idea for tonight."]),
+        ("Resolve a reference", "Please remember this fictional device: its name is Orion and its battery capacity is 6400 mAh.", "Retain Orion and capacity", [{"type":"contains","value":"Orion"}], [], ["What battery capacity did I give for the device?"]),
     ],
     "streaming": [
         ("Progressive explanation", "Explain how a rainbow forms in five numbered steps. Keep each step to one sentence.", "Five-step explanation", [{"type":"numbered_items","count":5}], []),
