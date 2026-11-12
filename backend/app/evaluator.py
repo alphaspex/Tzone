@@ -6,14 +6,13 @@ from .config import settings
 
 def _json_value(text):
     candidate = (text or "").strip()
-    if candidate.startswith("~~~"):
-        candidate = candidate[3:]
+    fence = chr(96) * 3
+    if candidate.startswith(fence):
+        candidate = candidate[len(fence):].strip()
         if candidate[:4].lower() == "json":
-            candidate = candidate[4:]
-        candidate = candidate.rstrip()
-        if candidate.endswith("~~~"):
-            candidate = candidate[:-3]
-        candidate = candidate.strip()
+            candidate = candidate[4:].strip()
+        if candidate.endswith(fence):
+            candidate = candidate[:-len(fence)].strip()
     return json.loads(candidate)
 
 def run_assertions(response, assertions, tool_events):
