@@ -5,7 +5,7 @@ import uuid
 import traceback
 from collections import deque
 from datetime import datetime, timezone
-from . import evaluator, playground, test_library, ui_store
+from . import evaluator, playground, test_library, ui_store, model_settings
 
 _LIVE = {}
 _TASKS = {}
@@ -29,12 +29,14 @@ async def _publish(run_id, event):
     async with condition:
         condition.notify_all()
 
-async def start_run(test_id):
+async def start_run(test_id, reasoning_effort=None):
     case = test_library.get_case(test_id)
     if case is None:
         case = await ui_store.get_custom_test(test_id)
     if not case:
         raise KeyError("Test not found")
+    if reasoning_effort not in (None, "", "auto"):
+        case["_reasoning_effort"] = reasoning_effort
     active = [task for task in _TASKS.values() if not task.done()]
     if len(active) >= _MAX_CONCURRENT_RUNS:
         raise RuntimeError("A test run is already active. This service runs one test at a time.")
@@ -45,12 +47,17 @@ async def start_run(test_id):
             break
         _TASKS.pop(oldest_id, None)
         _LIVE.pop(oldest_id, None)
+    model_id, global_effort, model = await model_settings.resolve()
+    selected_effort = reasoning_effort if reasoning_effort not in (None, "", "auto") else global_effort
+    selected_effort = model_settings.model_catalog.validate_reasoning_effort(model_id, selected_effort)
     run_id = "run_" + uuid.uuid4().hex[:16]
     created_at = _now()
     run = {
         "id":run_id,"session_id":run_id,"test_id":test_id,
         "test_name":case.get("name","Unnamed test"),"category":case.get("category"),
-        "difficulty":case.get("difficulty"),"status":"queued","passed":None,
+        "difficulty":case.get("difficulty"),"difficulty_label":case.get("difficulty_label"),
+        "model":model_id,"reasoning_effort":selected_effort or model["default_reasoning_effort"],
+        "status":"queued","passed":None,
         "created_at":created_at,"started_at":None,"completed_at":None,
         "result":None,"error":None,
     }
@@ -65,6 +72,7 @@ async def _execute_inner(run_id, case):
     await ui_store.update_run(run_id,{"status":"running","started_at":_now()})
     await _publish(run_id,{"type":"status","status":"running","message":"Starting test"})
     tool_events, responses, usage = [], [], {}
+    stream_event_count = 0
     final_latency = 0.0
     error = None
     error_trace = None
@@ -74,11 +82,14 @@ async def _execute_inner(run_id, case):
             if message.get("role") != "user":
                 continue
             await _publish(run_id,{"type":"activity","stage":"turn","turn":index+1,"message":"Processing conversation turn"})
+            turn_parameters = dict(case.get("parameters") or {})
+            if run_id and "reasoning_effort" not in turn_parameters and case.get("_reasoning_effort"):
+                turn_parameters["reasoning_effort"] = case["_reasoning_effort"]
             async for event in playground.stream_turn(
                 session_id=run_id,
                 user_text=message.get("content",""),
                 tool_names=case.get("tool_names",[]),
-                parameters=case.get("parameters",{}),
+                parameters=turn_parameters,
                 system_prompt=case.get("system_prompt",""),
             ):
                 if event.get("type") == "done":
@@ -95,11 +106,13 @@ async def _execute_inner(run_id, case):
                     error_trace = event.get("traceback","")
                     await _publish(run_id,{"type":"error","message":error,"traceback":error_trace})
                 else:
+                    if event.get("type") == "token":
+                        stream_event_count += 1
                     await _publish(run_id,event)
             if error:
                 break
         final_response = responses[-1] if responses else ""
-        deterministic = evaluator.run_assertions(final_response,case.get("assertions",[]),tool_events)
+        deterministic = evaluator.run_assertions(final_response,case.get("assertions",[]),tool_events,stream_event_count)
         await _publish(run_id,{"type":"evaluation","stage":"assertions","passed":deterministic["passed"],
                                "score":deterministic["score"]})
         judge = await evaluator.run_judge(final_response,case.get("judge_rubric",""))
@@ -118,7 +131,9 @@ async def _execute_inner(run_id, case):
             "expected_output":case.get("expected_output"),
             "assertion_results":deterministic,"model_evaluation":judge,
             "tool_events":tool_events,"errors":[{"message":error,"stack_trace":error_trace}] if error else [],
-            "usage":usage,"judge_usage":judge_usage,"latency_ms":round(total_latency,2),
+            "usage":usage,"judge_usage":judge_usage,"model":run.get("model") if run else None,
+            "reasoning_effort":run.get("reasoning_effort") if run else None,
+            "stream_text_events":stream_event_count,"latency_ms":round(total_latency,2),
             "model_latency_ms":round(final_latency,2),
         }
         final_status = "failed" if error else "completed"
