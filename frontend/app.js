@@ -900,8 +900,9 @@
       }).catch(e=>toast(e.message,true));
     }
     else if(action==="view-run") {
-      api("/ui/runs/"+encodeURIComponent(id)).then(x=>{
-        state.currentRun=x.run;state.currentRunEvents=[];
+      Promise.all([api("/ui/runs/"+encodeURIComponent(id)),api("/ui/runs/"+encodeURIComponent(id)+"/events")]).then(values=>{
+        state.currentRun=values[0].run;
+        state.currentRunEvents=values[1].events || [];
         navigate("runs");
       }).catch(e=>toast(e.message,true));
     }
