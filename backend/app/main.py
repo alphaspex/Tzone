@@ -1,27 +1,29 @@
-"""HTTP boundary. Input: OpenAI chat-completion requests. Output: streaming SSE."""
+"""HTTP entry point. Existing OpenAI-compatible routes and UI-only routes remain separate."""
 import json
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from . import agent, provider, store
+from . import agent, provider, store, ui_api, ui_store
 from .config import settings
 
 @asynccontextmanager
 async def lifespan(app):
     await provider.start_provider()
     await store.start_store()
+    await ui_store.start_ui_store()
     yield
     await store.close_store()
     await provider.close_provider()
 
-app = FastAPI(title="GLM Model Test Harness", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET","POST","OPTIONS"], allow_headers=["*"])
+app = FastAPI(title="GLM Model Test Harness", version="0.2.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET","POST","PUT","DELETE","OPTIONS"], allow_headers=["*"])
+app.include_router(ui_api.router)
 
 @app.get("/")
 async def root():
-    return {"name":"GLM Model Test Harness","status":"ok","model":settings.model,"streaming":True}
+    return {"name":"GLM Model Test Harness","status":"ok","model":settings.model,"streaming":True,"ui_api":"/ui"}
 
 @app.get("/health")
 async def health():
