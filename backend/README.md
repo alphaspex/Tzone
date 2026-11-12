@@ -34,6 +34,6 @@ Send `metadata.session_id` or `user` to reuse a session identifier.
 
 ## Runtime constraints
 
-One Uvicorn worker, at most 8 concurrent connections, short keep-alive, bounded HTTP pools, no heavyweight database SDK. The image uses Python slim and installs only FastAPI, Uvicorn and HTTPX.
+One Uvicorn worker and at most 2 concurrent connections, short keep-alive, bounded HTTP pools, no heavyweight database SDK. The image uses Python slim and installs only FastAPI, Uvicorn and HTTPX. Two concurrent connections is a conservative initial cap for the 120 MB limit; monitor actual memory during load tests.
 
 No backend API authentication is enabled, as requested. Restrict ingress before exposing the service publicly.
