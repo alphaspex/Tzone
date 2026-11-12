@@ -33,7 +33,9 @@ async def stream_response(request, session_id):
     started = time.monotonic()
     final_text, total_usage = "", None
     try:
-        for step in range(settings.max_agent_steps):
+        step = 0
+        while True:
+            step += 1
             payload = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
             if available_tools:
                 payload["tools"] = available_tools
@@ -88,8 +90,7 @@ async def stream_response(request, session_id):
                 yield _frame(chunk_id, created, model, {}, "tool_calls")
                 yield "data: [DONE]\n\n"
                 return
-            if step == settings.max_agent_steps - 1:
-                yield _frame(chunk_id, created, model, {"content":"\n[Agent step limit reached.]"})
+
         await store.save_message(session_id, "assistant", final_text)
         await store.save_metric(session_id, "latency_ms", (time.monotonic()-started)*1000)
         if total_usage:
