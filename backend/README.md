@@ -4,10 +4,15 @@ Dockerized FastAPI streaming gateway for Z.ai GLM-4.7-Flash. Designed for a 120 
 
 ## Deplexo Docker service
 
-Set the service's **Dockerfile path** to `backend/Dockerfile` (or set its root directory to `backend`, then use `Dockerfile`).
+Configure the service with:
+- **Repository:** `alphaspex/Tzone`
+- **Branch:** `main`
+- **Build context / root directory:** `backend`
+- **Dockerfile path:** `Dockerfile`
+- **Container port:** `8000` (or let Deplexo inject `PORT`)
 
 Required environment variables:
-- `ZAI_API_KEY` — set privately in Deplexo
+- `ZAI_API_KEY` — set privately in Deplexo when ready
 - `CLOUDFLARE_ACCOUNT_ID` — existing Cloudflare account ID
 - `CLOUDFLARE_API_TOKEN` — existing token with D1 read/write permissions
 - `D1_DATABASE_ID=520245ce-7de8-4462-afe6-3de6f0f9e985`
