@@ -32,9 +32,9 @@ _SCENARIOS = {
         ("Remember and retrieve", "Store the phrase 'blue lantern 42' under the key project_code, then retrieve it and tell me the value.", "blue lantern 42", [{"type":"tool_called","name":"memory_set"},{"type":"tool_called","name":"memory_get"},{"type":"contains","value":"blue lantern 42"}], ["memory_set","memory_get"]),
     ],
     "multi_turn": [
-        ("Remember a preference", "I prefer concise answers and use metric units. Please remember these preferences for the rest of our conversation.", "Remember the preference for later turns", [{"type":"tool_called","name":"memory_set"}], ["memory_set","memory_get"], ["I am planning a 5-kilometre walk. What units should you use for distance?"]),
-        ("Carry forward a constraint", "For this conversation, please remember to keep examples vegetarian.", "Retain the vegetarian constraint", [{"type":"contains_any","values":["vegetarian","plant-based","meat-free"]}], [], ["Suggest a simple dinner idea for tonight."]),
-        ("Resolve a reference", "Please remember this fictional device: its name is Orion and its battery capacity is 6400 mAh.", "Retain Orion and capacity", [{"type":"contains","value":"Orion"}], [], ["What battery capacity did I give for the device?"]),
+        ("Remember a preference", "I prefer concise answers and use metric units. Please remember these preferences for the rest of our conversation.", "Use metric units for distance", [{"type":"tool_called","name":"memory_set"},{"type":"contains_any","values":["metric","kilomet","metre","meter"]}], ["memory_set","memory_get"], ["I am planning a 5-kilometre walk. What units should you use for distance?"]),
+        ("Carry forward a constraint", "For this conversation, please remember to keep examples vegetarian.", "A vegetarian dinner suggestion", [{"type":"contains_any","values":["vegetarian","plant-based","meat-free"]}], [], ["Suggest a simple dinner idea for tonight."]),
+        ("Resolve a reference", "Please remember this fictional device: its name is Orion and its battery capacity is 6400 mAh.", "Orion with a 6400 mAh battery", [{"type":"contains","value":"Orion"},{"type":"contains","value":"6400"}], [], ["What battery capacity did I give for the device?"]),
     ],
     "streaming": [
         ("Progressive explanation", "Explain how a rainbow forms in five numbered steps. Keep each step to one sentence.", "Five-step explanation", [{"type":"numbered_items","count":5}], []),
