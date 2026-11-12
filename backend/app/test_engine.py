@@ -5,7 +5,7 @@ import uuid
 import traceback
 from collections import deque
 from datetime import datetime, timezone
-from . import evaluator, playground, test_library, ui_store, model_settings
+from . import evaluator, playground, test_library, ui_store, model_settings, model_catalog
 
 _LIVE = {}
 _TASKS = {}
@@ -96,7 +96,9 @@ async def _execute_inner(run_id, case):
                 if event.get("type") == "done":
                     responses.append(event.get("content",""))
                     tool_events.extend(event.get("tool_events",[]))
-                    usage.update(event.get("usage") or {})
+                    for key, value in (event.get("usage") or {}).items():
+                        if isinstance(value, (int, float)):
+                            usage[key] = usage.get(key, 0) + value
                     final_latency += float(event.get("latency_ms",0))
                     await _publish(run_id,{"type":"turn_complete","turn":index+1,
                                            "content":event.get("content",""),
@@ -125,6 +127,14 @@ async def _execute_inner(run_id, case):
                                "score":judge.get("score"),"passed":judge.get("passed")})
         passed = bool(deterministic["passed"] and (judge.get("passed") if judge.get("available") else True))
         total_latency = (time.monotonic()-started)*1000
+        model_id = run_record.get("model")
+        agent_cost = model_catalog.estimate_price(
+            model_id, usage.get("input_tokens", 0), usage.get("output_tokens", 0),
+            usage.get("cached_input_tokens", 0))
+        judge_cost = model_catalog.estimate_price(
+            model_id, judge_usage.get("input_tokens", 0), judge_usage.get("output_tokens", 0),
+            (judge_usage.get("input_tokens_details") or {}).get("cached_tokens", 0))
+        estimated_cost = round((agent_cost or 0) + (judge_cost or 0), 8)
         result = {
             "full_prompt":case.get("messages") or [{"role":"user","content":case.get("user_prompt","")}],
             "system_prompt":case.get("system_prompt",""),
@@ -134,14 +144,16 @@ async def _execute_inner(run_id, case):
             "tool_events":tool_events,"errors":[{"message":error,"stack_trace":error_trace}] if error else [],
             "usage":usage,"judge_usage":judge_usage,"model":run_record.get("model"),
             "reasoning_effort":run_record.get("reasoning_effort"),
-            "stream_text_events":stream_event_count,"latency_ms":round(total_latency,2),
+            "stream_text_events":stream_event_count,"estimated_cost_usd":estimated_cost,"latency_ms":round(total_latency,2),
             "model_latency_ms":round(final_latency,2),
         }
         final_status = "failed" if error else "completed"
         run = await ui_store.update_run(run_id,{
             "status":final_status,"passed":passed,"completed_at":_now(),
             "result":result,"error":error,"latency_ms":round(total_latency,2),
+            "estimated_cost_usd":estimated_cost,
         })
+        await ui_store.save_metric(run_id,"estimated_cost_usd",estimated_cost)
         await _publish(run_id,{"type":"done","status":final_status,"passed":passed,
                                "result":result,"latency_ms":round(total_latency,2)})
     except Exception as exc:
