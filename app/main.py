@@ -1,4 +1,5 @@
 """HTTP boundary. Input: OpenAI chat-completion requests. Output: streaming SSE."""
+import json
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -32,10 +33,15 @@ async def models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
+    raw = await request.body()
+    if len(raw) > 1_000_000:
+        return JSONResponse({"error":{"message":"Request body exceeds 1 MB limit","type":"invalid_request_error"}}, status_code=413)
     try:
-        body = await request.json()
+        body = json.loads(raw)
     except Exception:
         return JSONResponse({"error":{"message":"Request body must be valid JSON","type":"invalid_request_error"}}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error":{"message":"Request body must be a JSON object","type":"invalid_request_error"}}, status_code=400)
     if body.get("stream") is False:
         return JSONResponse({"error":{"message":"This service supports streaming only. Set stream=true.","type":"invalid_request_error"}}, status_code=400)
     metadata = body.get("metadata") or {}
