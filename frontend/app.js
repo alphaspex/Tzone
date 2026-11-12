@@ -914,7 +914,8 @@
     else if(action==="open-conversation") openConversation(id);
   }
   function setup() {
-    $("#navigation").addEventListener("click",handleClick);
+    $("#sidebar").addEventListener("click",handleClick);
+    $(".topbar").addEventListener("click",handleClick);
     $("#page-content").addEventListener("click",handleClick);
     $("#modal-root").addEventListener("click",handleClick);
     $("#refresh-button").addEventListener("click",refreshCurrent);
