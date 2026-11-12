@@ -28,7 +28,9 @@
     settings: null,
     runFilters: {status:"",category:"",test_id:"",passed:""},
     compareIds: new Set(),
-    refreshTimer: null
+    refreshTimer: null,
+    requestQueue: Promise.resolve(),
+    streamQueue: Promise.resolve()
   };
 
   const labels = {
@@ -51,6 +53,17 @@
   function url(path) {
     return base() + path;
   }
+  function withQueueSlot(queueName, task) {
+    const queued = state[queueName].then(task, task);
+    state[queueName] = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+  function withRequestSlot(task) {
+    return withQueueSlot("requestQueue", task);
+  }
+  function withStreamSlot(task) {
+    return withQueueSlot("streamQueue", task);
+  }
   async function api(path, options) {
     if (!base()) throw new Error("Add your Deplexo backend URL in Settings first.");
     const config = Object.assign({method:"GET",headers:{}}, options || {});
@@ -58,18 +71,20 @@
       config.headers["Content-Type"] = "application/json";
       config.body = JSON.stringify(config.body);
     }
-    const response = await fetch(url(path), config);
-    const type = response.headers.get("content-type") || "";
-    let payload;
-    if (type.includes("application/json")) payload = await response.json();
-    else payload = await response.text();
-    if (!response.ok) {
-      const message = payload && payload.detail ? payload.detail :
-        payload && payload.error && payload.error.message ? payload.error.message :
-        (typeof payload === "string" ? payload : "Request failed (" + response.status + ")");
-      throw new Error(message);
-    }
-    return payload;
+    return withRequestSlot(async () => {
+      const response = await fetch(url(path), config);
+      const type = response.headers.get("content-type") || "";
+      let payload;
+      if (type.includes("application/json")) payload = await response.json();
+      else payload = await response.text();
+      if (!response.ok) {
+        const message = payload && payload.detail ? payload.detail :
+          payload && payload.error && payload.error.message ? payload.error.message :
+          (typeof payload === "string" ? payload : "Request failed (" + response.status + ")");
+        throw new Error(message);
+      }
+      return payload;
+    });
   }
   function toast(message, isError) {
     const node = document.createElement("div");
@@ -508,46 +523,46 @@
     state.activeStream = controller;
     state.watchingRun = id;
     try {
-      const response = await fetch(url("/ui/runs/" + encodeURIComponent(id) + "/stream"),{signal:controller.signal});
-      if (!response.ok) throw new Error("Unable to open run event stream (" + response.status + ")");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value,{stream:true});
-        let split;
-        while ((split=buffer.indexOf("\n\n")) >= 0) {
-          const frame=buffer.slice(0,split); buffer=buffer.slice(split+2);
-          const eventName=(frame.match(/^event:\s*(.+)$/m) || [,"message"])[1].trim();
-          const data=(frame.match(/^data:\s*(.*)$/m) || [,""])[1];
-          if (data === "[DONE]") continue;
-          try {
-            const event=JSON.parse(data);
-            if (event.type === "token") {
-              // Token deltas are kept in the active response buffer, not the long-term trace list.
-              state.currentRunEvents.push(event);
-            } else state.currentRunEvents.push(event);
-            if (state.currentRunEvents.length > 1200) state.currentRunEvents.shift();
-            if (event.type === "done") {
-              const latest=await api("/ui/runs/" + encodeURIComponent(id));
-              state.currentRun=latest.run;
+      await withStreamSlot(async () => {
+        const response = await fetch(url("/ui/runs/" + encodeURIComponent(id) + "/stream"),{signal:controller.signal});
+        if (!response.ok) throw new Error("Unable to open run event stream (" + response.status + ")");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value,{stream:true});
+          let split;
+          while ((split=buffer.indexOf("\n\n")) >= 0) {
+            const frame=buffer.slice(0,split); buffer=buffer.slice(split+2);
+            const eventName=(frame.match(/^event:\s*(.+)$/m) || [,"message"])[1].trim();
+            const data=(frame.match(/^data:\s*(.*)$/m) || [,""])[1];
+            if (data === "[DONE]") continue;
+            try {
+              const event=JSON.parse(data);
+              if (event.type === "token") {
+                // Token deltas are kept in the active response buffer, not the long-term trace list.
+                state.currentRunEvents.push(event);
+              } else state.currentRunEvents.push(event);
+              if (state.currentRunEvents.length > 1200) state.currentRunEvents.shift();
+              appendRunEvent(event);
+            } catch (_) {
+              if (eventName === "error") toast(data,true);
             }
-            appendRunEvent(event);
-          } catch (_) {
-            if (eventName === "error") toast(data,true);
           }
         }
-      }
+      });
       const latest=await api("/ui/runs/" + encodeURIComponent(id));
       state.currentRun=latest.run;
       if (state.page === "runs") renderRuns();
     } catch (error) {
       if (error.name !== "AbortError") toast(error.message,true);
     } finally {
-      if (state.activeStream === controller) state.activeStream=null;
-      state.watchingRun=null;
+      if (state.activeStream === controller) {
+        state.activeStream=null;
+        state.watchingRun=null;
+      }
     }
   }
   function appendRunEvent(event) {
@@ -560,12 +575,6 @@
       node.scrollTop=node.scrollHeight;
       // Keep rendering small while preserving the full server trace.
       while(node.children.length>180) node.firstElementChild.remove();
-    }
-    if (event.type === "done" || event.type === "cancelled") {
-      api("/ui/runs/" + encodeURIComponent(event.run_id)).then(x=>{
-        state.currentRun=x.run;
-        if(state.page==="runs") renderRuns();
-      }).catch(()=>{});
     }
   }
   async function cancelRun(id) {
@@ -588,9 +597,11 @@
   }
   async function exportRun(id,format) {
     try {
-      const response=await fetch(url("/ui/runs/"+encodeURIComponent(id)+"/export?format="+encodeURIComponent(format)));
-      if(!response.ok) throw new Error("Export failed ("+response.status+")");
-      const blob=await response.blob();
+      const blob=await withRequestSlot(async () => {
+        const response=await fetch(url("/ui/runs/"+encodeURIComponent(id)+"/export?format="+encodeURIComponent(format)));
+        if(!response.ok) throw new Error("Export failed ("+response.status+")");
+        return response.blob();
+      });
       const anchor=document.createElement("a");
       anchor.href=URL.createObjectURL(blob);
       anchor.download=id+"."+ (format==="markdown"?"md":"json");
@@ -673,51 +684,54 @@
     if(toolPanel) toolPanel.innerHTML="";
     $("#chat-send").disabled=true;
     $("#chat-latency").textContent="Running…";
+    let fullText="",doneEvent=null;
     try {
-      const response=await fetch(url("/ui/agent/chat"),{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:text,test_id:testId,conversation_id:state.conversationId}),
-        signal:controller.signal
-      });
-      if(!response.ok) {
-        const body=await response.json().catch(()=>({}));
-        throw new Error(body.detail || "Chat failed ("+response.status+")");
-      }
-      state.conversationId=response.headers.get("X-Conversation-ID") || state.conversationId;
-      const reader=response.body.getReader(),decoder=new TextDecoder();
-      let buffer="",fullText="",doneEvent=null;
-      while(true) {
-        const item=await reader.read(); if(item.done) break;
-        buffer+=decoder.decode(item.value,{stream:true});
-        let split;
-        while((split=buffer.indexOf("\n\n"))>=0) {
-          const frame=buffer.slice(0,split); buffer=buffer.slice(split+2);
-          const data=(frame.match(/^data:\s*(.*)$/m)||[,""])[1];
-          if(!data || data==="[DONE]") continue;
-          const event=JSON.parse(data);
-          if(event.type==="token") {
-            fullText+=event.text||"";
-            const span=assistant.querySelector(".streaming-text"); if(span) span.textContent=fullText;
-            scrollChat();
-          } else if(event.type==="tool_call" || event.type==="tool_result") {
-            if(toolPanel) {
-              const placeholder=toolPanel.querySelector(".empty-state"); if(placeholder) placeholder.remove();
-              toolPanel.insertAdjacentHTML("beforeend",'<div class="event-row">'+renderEvent(event)+'</div>');
-              toolPanel.scrollTop=toolPanel.scrollHeight;
+      await withStreamSlot(async () => {
+        const response=await fetch(url("/ui/agent/chat"),{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({message:text,test_id:testId,conversation_id:state.conversationId}),
+          signal:controller.signal
+        });
+        if(!response.ok) {
+          const body=await response.json().catch(()=>({}));
+          throw new Error(body.detail || "Chat failed ("+response.status+")");
+        }
+        state.conversationId=response.headers.get("X-Conversation-ID") || state.conversationId;
+        const reader=response.body.getReader(),decoder=new TextDecoder();
+        let buffer="";
+        while(true) {
+          const item=await reader.read(); if(item.done) break;
+          buffer+=decoder.decode(item.value,{stream:true});
+          let split;
+          while((split=buffer.indexOf("\n\n"))>=0) {
+            const frame=buffer.slice(0,split); buffer=buffer.slice(split+2);
+            const data=(frame.match(/^data:\s*(.*)$/m)||[,""])[1];
+            if(!data || data==="[DONE]") continue;
+            const event=JSON.parse(data);
+            if(event.type==="token") {
+              fullText+=event.text||"";
+              const span=assistant.querySelector(".streaming-text"); if(span) span.textContent=fullText;
+              scrollChat();
+            } else if(event.type==="tool_call" || event.type==="tool_result") {
+              if(toolPanel) {
+                const placeholder=toolPanel.querySelector(".empty-state"); if(placeholder) placeholder.remove();
+                toolPanel.insertAdjacentHTML("beforeend",'<div class="event-row">'+renderEvent(event)+'</div>');
+                toolPanel.scrollTop=toolPanel.scrollHeight;
+              }
+            } else if(event.type==="metrics") {
+              const usage=event.usage||{};
+              $("#chat-prompt-tokens").textContent=usage.prompt_tokens||"—";
+              $("#chat-completion-tokens").textContent=usage.completion_tokens||"—";
+              $("#chat-total-tokens").textContent=usage.total_tokens||"—";
+            } else if(event.type==="done") {
+              doneEvent=event;
+              if(event.content) fullText=event.content;
+            } else if(event.type==="error") {
+              throw new Error(event.message||"Model error");
             }
-          } else if(event.type==="metrics") {
-            const usage=event.usage||{};
-            $("#chat-prompt-tokens").textContent=usage.prompt_tokens||"—";
-            $("#chat-completion-tokens").textContent=usage.completion_tokens||"—";
-            $("#chat-total-tokens").textContent=usage.total_tokens||"—";
-          } else if(event.type==="done") {
-            doneEvent=event;
-            if(event.content) fullText=event.content;
-          } else if(event.type==="error") {
-            throw new Error(event.message||"Model error");
           }
         }
-      }
+      });
       if(assistant) {
         const span=assistant.querySelector(".streaming-text");
         if(span) span.textContent=fullText;
