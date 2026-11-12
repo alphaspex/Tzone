@@ -95,8 +95,9 @@ async def create_run(run):
     item = dict(run)
     _RUNS[item["id"]] = item
     while len(_RUNS) > _MAX_MEMORY_RUNS:
-        _RUNS.pop(next(iter(_RUNS)))
-        _EVENTS.pop(next(iter(_EVENTS)), None)
+        oldest_id = next(iter(_RUNS))
+        _RUNS.pop(oldest_id, None)
+        _EVENTS.pop(oldest_id, None)
     if store.configured():
         await store.execute(
             "INSERT INTO test_runs (id, session_id, test_name, status, details_json) VALUES (?, ?, ?, ?, ?)",
