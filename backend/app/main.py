@@ -7,13 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from . import model_catalog, provider, store
+from . import model_catalog, model_settings, provider, store
 from .config import settings
 
 
 def selected_model():
-    model_id = settings.default_model
-    return model_catalog.get_model(model_id) or model_catalog.get_model("muse-spark-1.3")
+    return model_settings.get_settings()
 
 
 @asynccontextmanager
