@@ -968,8 +968,13 @@
     function syncModelControls() {
       const model = models.find(item=>item.id===modelSelect.value);
       if(!model) return;
+      const effortLabels = {
+        minimal:"Minimal — lowest effort", low:"Low — light reasoning",
+        medium:"Medium — balanced reasoning", high:"High — deeper reasoning",
+        xhigh:"XHigh — very deep reasoning", max:"Max — maximum supported"
+      };
       const opts = [{value:"auto",label:"Meta default (" + model.default_reasoning_effort + ")"}]
-        .concat((model.reasoning_efforts || []).map(value=>({value,label:value.toUpperCase()})));
+        .concat((model.reasoning_efforts || []).map(value=>({value,label:effortLabels[value] || value})));
       const keep = Array.from(effortSelect.options).find(option=>option.value===effortSelect.value);
       const wanted = keep && opts.some(item=>item.value===keep.value) ? keep.value : "auto";
       effortSelect.innerHTML = opts.map(item=>'<option value="' + esc(item.value) + '"' + (item.value===wanted?" selected":"") + '>' + esc(item.label) + '</option>').join("");
