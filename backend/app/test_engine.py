@@ -18,7 +18,8 @@ async def _publish(run_id, event):
     state = _LIVE.get(run_id)
     if not state:
         return
-    item = {"run_id":run_id,"timestamp":_now(),**event}
+    item = {"run_id":run_id,"timestamp":_now(),**event,"_seq":state["next_seq"]}
+    state["next_seq"] += 1
     state["events"].append(item)
     if item.get("type") != "token":
         await ui_store.save_run_event(run_id,item)
@@ -45,7 +46,7 @@ async def start_run(test_id):
         "result":None,"error":None,
     }
     condition = asyncio.Condition()
-    _LIVE[run_id] = {"events":deque(maxlen=_MAX_LIVE_EVENTS),"condition":condition,"done":False}
+    _LIVE[run_id] = {"events":deque(maxlen=_MAX_LIVE_EVENTS),"condition":condition,"done":False,"next_seq":0}
     await ui_store.create_run(run)
     _TASKS[run_id] = asyncio.create_task(_execute(run_id,case))
     return run
@@ -144,23 +145,24 @@ async def cancel_run(run_id):
     return await ui_store.get_run(run_id)
 
 async def stream_events(run_id):
-    """Replay buffered activity then wait for new events until the run completes."""
+    """Replay buffered activity and wait safely for new events until the run completes."""
     state = _LIVE.get(run_id)
     if state is None:
         for event in await ui_store.list_run_events(run_id):
             yield event
         return
-    index = 0
+    cursor = 0
+    condition = state["condition"]
     while True:
-        events = list(state["events"])
-        # If the bounded deque rolled over, continue from its oldest retained event.
-        start = max(0, len(events) - _MAX_LIVE_EVENTS)
-        if index < start:
-            index = start
-        while index < len(events):
-            yield events[index]
-            index += 1
-        if state["done"]:
+        async with condition:
+            await condition.wait_for(
+                lambda: state["done"] or any(item["_seq"] >= cursor for item in state["events"])
+            )
+            batch = list(state["events"])
+            finished = state["done"]
+        for item in batch:
+            if item["_seq"] >= cursor:
+                cursor = item["_seq"] + 1
+                yield {key:value for key,value in item.items() if key != "_seq"}
+        if finished and not any(item["_seq"] >= cursor for item in state["events"]):
             break
-        async with state["condition"]:
-            await state["condition"].wait()
