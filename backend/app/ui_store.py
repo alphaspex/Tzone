@@ -78,7 +78,7 @@ async def get_custom_test(test_id):
         return None
     item = _json(rows[0].get("definition_json"), {})
     if item:
-        _CUSTOM[test_id] = item
+        _cache_custom(item)
     return item or None
 
 async def list_custom_tests():
@@ -103,11 +103,7 @@ async def delete_custom_test(test_id):
 
 async def create_run(run):
     item = dict(run)
-    _RUNS[item["id"]] = item
-    while len(_RUNS) > _MAX_MEMORY_RUNS:
-        oldest_id = next(iter(_RUNS))
-        _RUNS.pop(oldest_id, None)
-        _EVENTS.pop(oldest_id, None)
+    _cache_run(item)
     if store.configured():
         await store.execute(
             "INSERT INTO test_runs (id, session_id, test_name, status, details_json) VALUES (?, ?, ?, ?, ?)",
@@ -119,7 +115,7 @@ async def update_run(run_id, changes):
     if not item:
         return None
     item.update(changes)
-    _RUNS[run_id] = item
+    _cache_run(item)
     if store.configured():
         await store.execute("UPDATE test_runs SET status = ?, details_json = ? WHERE id = ?",
                             [item.get("status","unknown"), json.dumps(item, ensure_ascii=False), run_id])
@@ -148,7 +144,7 @@ async def list_runs(limit=100):
     for row in rows:
         item = _json(row.get("details_json"), {})
         item.update({"id":row.get("id"),"session_id":row.get("session_id"),"test_id":row.get("test_name"),"status":row.get("status"),"created_at":row.get("created_at")})
-        _RUNS[item["id"]] = item
+        _cache_run(item)
         result.append(item)
     return result
 
