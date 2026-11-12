@@ -19,10 +19,16 @@ class CatalogTests(unittest.TestCase):
     def test_difficulty_levels_are_complete(self):
         self.assertEqual(len(test_library.LEVELS), 5)
         for category in test_library.CATEGORIES:
-            self.assertEqual(len(test_library.list_cases(category)), 15)
+            cases = test_library.list_cases(category)
+            self.assertEqual(len(cases), 15)
+            first_scenario = [test_library.get_case("builtin-" + category + "-" + level + "-01")["user_prompt"] for level in test_library.LEVELS]
+            self.assertEqual(len(set(first_scenario)), 5)
 
 
 class EvaluatorTests(unittest.TestCase):
+    def test_markdown_fenced_json(self):
+        self.assertEqual(evaluator._json_value(chr(96) * 3 + "json\n{\"ok\":true}\n" + chr(96) * 3), {"ok":True})
+
     def test_json_assertions(self):
         result = evaluator.run_assertions(
             '{"name":"Ada","age":37,"active":true}',
