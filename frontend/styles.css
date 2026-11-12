@@ -166,3 +166,15 @@ tbody tr:hover{background:#1a2230}
   .chat-panel{min-height:550px}.message{max-width:96%}
   .panel{padding:14px}.topbar-right{gap:7px}
 }
+
+
+/* Meta Contributor model consent notice */
+.notice.warning {
+  border: 1px solid rgba(226, 168, 72, .45);
+  background: rgba(226, 168, 72, .09);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: var(--text, inherit);
+}
+.notice.warning strong { display: block; margin-bottom: 6px; }
+.notice.warning p { margin: 0; line-height: 1.5; }
