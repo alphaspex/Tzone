@@ -154,6 +154,7 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
                 break
 
             for call in function_calls:
+                args = {}
                 name = str(call.get("name") or "")
                 call_id = str(call.get("call_id") or "")
                 raw_args = call.get("arguments") or "{}"
@@ -172,7 +173,6 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
                     output = tools.run(name, args, session_id)
                     status = "ok"
                 except Exception as exc:
-                    args = args if "args" in locals() and isinstance(args, dict) else {}
                     output = {"error": str(exc)[:500]}
                     status = "error"
                     yield {
