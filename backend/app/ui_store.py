@@ -13,6 +13,14 @@ _MAX_MEMORY_RUNS = 30
 _MAX_MEMORY_CONVERSATIONS = 32
 _MAX_CUSTOM = 200
 
+def _cache_run(item):
+    _cache_run(item)
+
+def _cache_custom(item):
+    _CUSTOM[item["id"]] = item
+    while len(_CUSTOM) > _MAX_CUSTOM:
+        _CUSTOM.pop(next(iter(_CUSTOM)), None)
+
 def _json(value, default=None):
     if value is None:
         return default
@@ -49,9 +57,7 @@ async def start_ui_store():
 
 async def save_custom_test(test):
     item = dict(test)
-    _CUSTOM[item["id"]] = item
-    while len(_CUSTOM) > _MAX_CUSTOM:
-        _CUSTOM.pop(next(iter(_CUSTOM)))
+    _cache_custom(item)
     if store.configured():
         await store.execute(
             "INSERT INTO custom_tests (id, category, difficulty, definition_json, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET category=excluded.category, difficulty=excluded.difficulty, definition_json=excluded.definition_json, updated_at=CURRENT_TIMESTAMP",
@@ -79,7 +85,7 @@ async def list_custom_tests():
     for row in rows:
         item = _json(row.get("definition_json"), {})
         if item:
-            _CUSTOM[item.get("id")] = item
+            _cache_custom(item)
             result.append(item)
     return result
 
@@ -126,7 +132,7 @@ async def get_run(run_id):
     row = rows[0]
     item = _json(row.get("details_json"), {})
     item.update({"id":row.get("id"),"session_id":row.get("session_id"),"test_id":row.get("test_name"),"status":row.get("status"),"created_at":row.get("created_at")})
-    _RUNS[run_id] = item
+    _cache_run(item)
     return item
 
 async def list_runs(limit=100):
