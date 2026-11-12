@@ -59,7 +59,10 @@ async def _validate_custom_test(body, existing=None):
     if not isinstance(assertions,list) or len(assertions) > 25:
         raise HTTPException(422,"assertions must be a list of at most 25 rules")
     configured = await model_settings.get_settings()
-    parameters = playground.normalize_parameters(data.get("parameters") or {}, configured["model"])
+    try:
+        parameters = playground.normalize_parameters(data.get("parameters") or {}, configured["model"])
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc))
     parameters.setdefault("max_output_tokens", 1024)
     return {
         "id":data.get("id") or "custom_" + uuid.uuid4().hex[:16],
