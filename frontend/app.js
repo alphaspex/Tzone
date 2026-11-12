@@ -531,7 +531,8 @@
       statCard("Assertions",assertion.total == null ? "—" : (assertion.passed_count || 0) + "/" + assertion.total,"Deterministic checks","✓") +
       statCard("Judge score",result.model_evaluation && result.model_evaluation.score != null ? result.model_evaluation.score + "/100" : "—","Separate evaluator","◎") +
       statCard("Estimated cost",result.estimated_cost_usd==null?"—":"$"+Number(result.estimated_cost_usd).toFixed(6),"Meta token-rate estimate","$") +
-      statCard("Total tokens",(result.usage || {}).total_tokens || "—","Provider usage","▤") + '</div>' +
+      statCard("Total tokens",(result.usage || {}).total_tokens || "—","Meta token usage","▤") +
+      statCard("Estimated cost",result.estimated_cost_usd==null?"—":"$"+Number(result.estimated_cost_usd).toFixed(6),"Input/output token-rate estimate","$") + '</div>' +
       panel("Live activity","Token stream, agent activity, tools, metrics and evaluation",'<div class="event-stream" id="run-events">' +
         events.slice(-180).map(renderEvent).join("") + (events.length ? "" : '<div class="muted">Waiting for run events…</div>') + '</div>') +
       (run.result ? '<div class="grid two-col">' +
