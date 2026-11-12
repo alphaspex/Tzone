@@ -90,7 +90,7 @@ async def _meta_proxy(request: Request, path: str):
     }
     if body.get("stream"):
         return StreamingResponse(
-            upstream.aiter_raw(),
+            upstream.aiter_bytes(),
             status_code=upstream.status_code,
             media_type=upstream.headers.get("content-type", "text/event-stream"),
             headers=headers,
