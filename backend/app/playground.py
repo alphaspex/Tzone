@@ -60,6 +60,8 @@ def _response_text(response):
         for content in item.get("content") or []:
             if content.get("type") == "output_text":
                 parts.append(content.get("text", ""))
+            elif content.get("type") == "refusal":
+                parts.append(content.get("refusal", ""))
     return "".join(parts)
 
 
@@ -126,6 +128,11 @@ async def stream_turn(session_id, user_text, tool_names=None, parameters=None, s
             async for event in provider.stream_events(payload):
                 event_type = event.get("type")
                 if event_type == "response.output_text.delta":
+                    piece = event.get("delta") or ""
+                    if piece:
+                        response_parts.append(piece)
+                        yield {"type": "token", "text": piece, "step": step}
+                elif event_type == "response.refusal.delta":
                     piece = event.get("delta") or ""
                     if piece:
                         response_parts.append(piece)
