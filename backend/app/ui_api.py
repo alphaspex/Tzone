@@ -72,6 +72,7 @@ def _validate_custom_test(body, existing=None):
         "judge_rubric":str(data.get("judge_rubric",""))[:3000],
         "tool_names":[n for n in data.get("tool_names",[]) if n in tools.available_names()] if data.get("tool_names") else tools.select_for_task(prompt),
         "parameters":parameters,
+        "timeout_seconds":max(5,min(int(data.get("timeout_seconds",90)),300)),
         "tags":[str(x)[:40] for x in data.get("tags",[])[:20]],
         "is_builtin":False,
     }
