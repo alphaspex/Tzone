@@ -103,6 +103,10 @@ async def _execute_inner(run_id, case):
         await _publish(run_id,{"type":"evaluation","stage":"assertions","passed":deterministic["passed"],
                                "score":deterministic["score"]})
         judge = await evaluator.run_judge(final_response,case.get("judge_rubric",""))
+        judge_usage = judge.get("usage") or {}
+        for key,value in judge_usage.items():
+            if isinstance(value,(int,float)):
+                await ui_store.save_metric(run_id,"judge_"+key,value)
         await _publish(run_id,{"type":"evaluation","stage":"model_judge","available":judge.get("available"),
                                "score":judge.get("score"),"passed":judge.get("passed")})
         passed = bool(deterministic["passed"] and (judge.get("passed") if judge.get("available") else True))
@@ -114,7 +118,7 @@ async def _execute_inner(run_id, case):
             "expected_output":case.get("expected_output"),
             "assertion_results":deterministic,"model_evaluation":judge,
             "tool_events":tool_events,"errors":[{"message":error,"stack_trace":error_trace}] if error else [],
-            "usage":usage,"latency_ms":round(total_latency,2),
+            "usage":usage,"judge_usage":judge_usage,"latency_ms":round(total_latency,2),
             "model_latency_ms":round(final_latency,2),
         }
         final_status = "failed" if error else "completed"
