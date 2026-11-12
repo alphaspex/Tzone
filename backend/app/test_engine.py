@@ -144,8 +144,17 @@ async def _execute(run_id, case):
         await asyncio.wait_for(_execute_inner(run_id, case), timeout=timeout_seconds)
     except asyncio.TimeoutError:
         message = f"Test exceeded its {timeout_seconds}-second timeout."
+        timeout_result = {
+            "full_prompt":case.get("messages") or [{"role":"user","content":case.get("user_prompt","")}],
+            "system_prompt":case.get("system_prompt",""),"full_response":"",
+            "turn_responses":[],"expected_output":case.get("expected_output"),
+            "assertion_results":{"passed":False,"passed_count":0,"total":0,"score":None,"skipped":True,"assertions":[]},
+            "model_evaluation":{"available":False,"score":None,"reason":"Run timed out before evaluation."},
+            "tool_events":[],"errors":[{"message":message,"stack_trace":"asyncio.TimeoutError"}],
+            "usage":{},"judge_usage":{},"latency_ms":timeout_seconds*1000,
+        }
         await ui_store.update_run(run_id,{"status":"failed","passed":False,
-            "completed_at":_now(),"error":message})
+            "completed_at":_now(),"error":message,"result":timeout_result,"latency_ms":timeout_seconds*1000})
         await _publish(run_id,{"type":"error","status":"failed","message":message})
         await _publish(run_id,{"type":"done","status":"failed","passed":False,"error":message})
     except asyncio.CancelledError:
