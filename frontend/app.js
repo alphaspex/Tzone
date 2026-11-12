@@ -26,7 +26,7 @@
     metrics: [],
     traces: [],
     settings: null,
-    runFilters: {status:"",category:"",test_id:""},
+    runFilters: {status:"",category:"",test_id:"",passed:""},
     compareIds: new Set(),
     refreshTimer: null
   };
@@ -174,7 +174,8 @@
   }
   async function renderOverview() {
     const content = $("#page-content");
-    const data = await getDashboard();
+    const results = await Promise.all([getDashboard(),api("/ui/system"),api("/ui/metrics?limit=500")]);
+    const data = results[0], system = results[1], metricsData = results[2];
     const runs = data.recent_runs || [];
     const passed = data.runs_passed == null ? "—" : data.runs_passed;
     const rate = data.pass_rate == null ? "—" : Math.round(data.pass_rate * 100) + "%";
@@ -191,14 +192,23 @@
       esc(run.test_name || run.test_id) + '</div><div class="activity-meta">' + esc(run.status) +
       ' · ' + esc(run.id) + '</div></div><span style="margin-left:auto">' + statusBadge(run.status) +
       '</span></div>').join("") + '</div>' : empty("No active runs","Live execution activity will appear here.","◉");
-    const ram = data.system_memory_mb == null ? "—" : data.system_memory_mb + " MB";
+    const ram = system.memory_rss_mb == null ? "—" : system.memory_rss_mb + " MB";
+    const cpuLoad = system.load_average && system.load_average.length ? Number(system.load_average[0]).toFixed(2) + " / " + (system.cpu_count || "—") + " cores" : "—";
+    const metricRows = metricsData.metrics || [];
+    const latencyValues = metricRows.filter(x=>x.metric==="latency_ms").map(x=>Number(x.value)).filter(Number.isFinite);
+    const averageLatency = latencyValues.length ? formatDuration(latencyValues.reduce((a,b)=>a+b,0)/latencyValues.length) : "—";
+    const tokenTotal = metricRows.filter(x=>x.metric==="total_tokens").reduce((sum,x)=>sum+Number(x.value||0),0);
     content.innerHTML = heading("Overview","Your model testing workspace at a glance.",
       '<button class="btn" data-action="refresh">↻ Refresh</button><button class="btn primary" data-page="builder">＋ New test</button>') +
       '<div class="grid stats-grid">' +
       statCard("Total runs",data.runs_total || 0,"Recent run history","▷") +
       statCard("Pass rate",rate,(data.runs_completed || 0) + " completed runs","✓") +
+      statCard("Average latency",averageLatency,"Recent response samples","◷") +
+      statCard("Token usage",tokenTotal || "—","Recorded model tokens","▤") +
       statCard("Built-in tests",data.built_in_tests || 0,"Across 11 capability categories","✳") +
-      statCard("Memory usage",ram,"Current backend RSS snapshot","▦") + '</div>' +
+      statCard("Memory usage",ram,"Current backend RSS snapshot","▦") +
+      statCard("CPU load",cpuLoad,"1-minute load average / CPU cores","⌁") +
+      statCard("Backend",system.status || "—","Runtime status","●") + '</div>' +
       '<div class="grid two-col">' +
       panel("Recent test runs","Latest saved executions",rows,'<button class="text-link" data-page="runs">View all →</button>') +
       panel("Live activity","Currently executing tests",activity,'<span class="badge info">' + active.length + ' active</span>') +
@@ -391,6 +401,7 @@
     if (state.runFilters.status) query.set("status",state.runFilters.status);
     if (state.runFilters.category) query.set("category",state.runFilters.category);
     if (state.runFilters.test_id) query.set("test_id",state.runFilters.test_id);
+    if (state.runFilters.passed) query.set("passed",state.runFilters.passed);
     const [result,categories] = await Promise.all([api("/ui/runs?" + query.toString()),api("/ui/tests/categories")]);
     state.runs = result.runs || [];
     const options = [{value:"",label:"All categories"}].concat((categories.categories || []).map(x=>({value:x.id,label:x.name})));
@@ -411,12 +422,13 @@
         (state.runFilters.status === x ? " selected" : "") + '>' + x + '</option>').join("") +
       '</select><select class="select" id="run-category">' + options.map(x=>'<option value="' + esc(x.value) + '"' +
         (state.runFilters.category === x.value ? " selected" : "") + '>' + esc(x.label) + '</option>').join("") +
-      '</select><button class="btn" data-action="compare-runs" ' + (state.compareIds.size < 2 ? "disabled" : "") +
+      '</select><select class="select" id="run-passed"><option value="">Any result</option><option value="true" '+(state.runFilters.passed==="true"?"selected":"")+'>Passed</option><option value="false" '+(state.runFilters.passed==="false"?"selected":"")+'>Failed</option></select><button class="btn" data-action="compare-runs" ' + (state.compareIds.size < 2 ? "disabled" : "") +
       '>⇄ Compare (' + state.compareIds.size + ')</button></div>' +
       panel("Run history",state.runs.length + " records",rows) +
       (state.currentRun ? renderRunDetail(state.currentRun) : '');
     $("#run-status").addEventListener("change",e=>{state.runFilters.status=e.target.value;renderRuns();});
     $("#run-category").addEventListener("change",e=>{state.runFilters.category=e.target.value;renderRuns();});
+    $("#run-passed").addEventListener("change",e=>{state.runFilters.passed=e.target.value;renderRuns();});
     $("#compare-all").addEventListener("change",e=>{
       if (e.target.checked) state.runs.slice(0,10).forEach(x=>state.compareIds.add(x.id));
       else state.runs.forEach(x=>state.compareIds.delete(x.id));
@@ -626,6 +638,10 @@
     const input=$("#chat-input");
     const text=input.value.trim();
     if(!text) return;
+    const testId=state.chatMode==="test" && state.selectedTest ? state.selectedTest.id : null;
+    if(state.chatMode==="test" && !testId) {
+      toast("Choose a test scenario first.",true); return;
+    }
     if(state.chatController) state.chatController.abort();
     const controller=new AbortController();
     state.chatController=controller;
@@ -637,10 +653,6 @@
     if(toolPanel) toolPanel.innerHTML="";
     $("#chat-send").disabled=true;
     $("#chat-latency").textContent="Running…";
-    const testId=state.chatMode==="test" && state.selectedTest ? state.selectedTest.id : null;
-    if(state.chatMode==="test" && !testId) {
-      toast("Choose a test scenario first.",true); $("#chat-send").disabled=false; return;
-    }
     try {
       const response=await fetch(url("/ui/agent/chat"),{
         method:"POST",headers:{"Content-Type":"application/json"},
