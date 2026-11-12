@@ -137,7 +137,7 @@ async def _execute_inner(run_id, case):
 
 
 async def _execute(run_id, case):
-    """Enforce each test's own timeout; cancellation and timeout are distinct outcomes."""
+    """Run until completion, error, or explicit cancellation."""
     state = _LIVE.get(run_id)
     try:
         await _execute_inner(run_id, case)
