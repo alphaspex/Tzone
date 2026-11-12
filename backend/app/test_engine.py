@@ -35,8 +35,6 @@ async def start_run(test_id, reasoning_effort=None):
         case = await ui_store.get_custom_test(test_id)
     if not case:
         raise KeyError("Test not found")
-    if reasoning_effort not in (None, "", "auto"):
-        case["_reasoning_effort"] = reasoning_effort
     active = [task for task in _TASKS.values() if not task.done()]
     if len(active) >= _MAX_CONCURRENT_RUNS:
         raise RuntimeError("A test run is already active. This service runs one test at a time.")
@@ -48,8 +46,12 @@ async def start_run(test_id, reasoning_effort=None):
         _TASKS.pop(oldest_id, None)
         _LIVE.pop(oldest_id, None)
     model_id, global_effort, model = await model_settings.resolve()
-    selected_effort = reasoning_effort if reasoning_effort not in (None, "", "auto") else global_effort
-    selected_effort = model_settings.model_catalog.validate_reasoning_effort(model_id, selected_effort)
+    stored_effort = (case.get("parameters") or {}).get("reasoning_effort")
+    requested_effort = reasoning_effort if reasoning_effort not in (None, "", "auto") else stored_effort
+    selected_effort = model_settings.model_catalog.validate_reasoning_effort(
+        model_id, requested_effort if requested_effort not in (None, "", "auto") else global_effort)
+    if selected_effort:
+        case["_reasoning_effort"] = selected_effort
     run_id = "run_" + uuid.uuid4().hex[:16]
     created_at = _now()
     run = {
@@ -84,7 +86,7 @@ async def _execute_inner(run_id, case):
                 continue
             await _publish(run_id,{"type":"activity","stage":"turn","turn":index+1,"message":"Processing conversation turn"})
             turn_parameters = dict(case.get("parameters") or {})
-            if run_id and "reasoning_effort" not in turn_parameters and case.get("_reasoning_effort"):
+            if case.get("_reasoning_effort"):
                 turn_parameters["reasoning_effort"] = case["_reasoning_effort"]
             async for event in playground.stream_turn(
                 session_id=run_id,
